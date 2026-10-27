@@ -3,12 +3,21 @@ import { analyzeArticle } from './aiProcessor.js';
 
 /**
  * Processes a limited batch of pending or failed articles using the AI pipeline.
- * Default trial batch limit is 3 articles.
+ * Runs calls in parallel for fast response times (~3-5 seconds total).
+ * Automatically heals any orphaned 'processing' states.
  */
 export async function processPendingArticles({ limit = 3 } = {}) {
   const batchSize = Math.max(1, Math.min(20, parseInt(limit, 10) || 3));
 
-  // 1. Fetch pending or failed articles
+  // 1. Auto-heal: reset any stuck 'processing' articles back to 'pending'
+  await pool.query(`
+    UPDATE articles 
+    SET processing_status = 'pending' 
+    WHERE processing_status = 'processing' 
+      AND (processed_at IS NULL OR processed_at < NOW() - INTERVAL '2 minutes')
+  `);
+
+  // 2. Fetch pending or failed articles
   const selectQuery = `
     SELECT id, title, summary, url
     FROM articles
@@ -22,30 +31,23 @@ export async function processPendingArticles({ limit = 3 } = {}) {
 
   if (articles.length === 0) {
     return {
-      message: 'No pending or failed articles found to process.',
+      message: 'All articles in the database have already been processed! Click "Ingest Latest RSS" to add fresh tech stories to analyze.',
       totalSelected: 0,
       succeeded: 0,
       failed: 0,
-      articles: []
+      results: []
     };
   }
 
-  // 2. Mark articles as 'processing' to prevent concurrent jobs
+  // 3. Mark selected articles as 'processing'
   const articleIds = articles.map((a) => a.id);
   await pool.query(
     'UPDATE articles SET processing_status = $1 WHERE id = ANY($2::int[])',
     ['processing', articleIds]
   );
 
-  const stats = {
-    totalSelected: articles.length,
-    succeeded: 0,
-    failed: 0,
-    results: []
-  };
-
-  // 3. Process each article
-  for (const article of articles) {
+  // 4. Process all articles concurrently in parallel for maximum speed
+  const tasks = articles.map(async (article) => {
     try {
       console.log(`Processing article ID ${article.id}: "${article.title.slice(0, 50)}..."`);
       const analysis = await analyzeArticle({
@@ -76,14 +78,13 @@ export async function processPendingArticles({ limit = 3 } = {}) {
         article.id
       ]);
 
-      stats.succeeded += 1;
-      stats.results.push({
+      return {
         id: article.id,
         title: article.title,
         status: 'completed',
         importance_score: analysis.importance_score,
         category: analysis.category
-      });
+      };
     } catch (err) {
       console.error(`Error processing article ID ${article.id}:`, err.message);
 
@@ -92,15 +93,23 @@ export async function processPendingArticles({ limit = 3 } = {}) {
         ['failed', err.message, article.id]
       );
 
-      stats.failed += 1;
-      stats.results.push({
+      return {
         id: article.id,
         title: article.title,
         status: 'failed',
         error: err.message
-      });
+      };
     }
-  }
+  });
+
+  const results = await Promise.all(tasks);
+
+  const stats = {
+    totalSelected: articles.length,
+    succeeded: results.filter((r) => r.status === 'completed').length,
+    failed: results.filter((r) => r.status === 'failed').length,
+    results
+  };
 
   return stats;
 }
@@ -158,4 +167,3 @@ export async function retrySingleArticle(articleId) {
     throw err;
   }
 }
-

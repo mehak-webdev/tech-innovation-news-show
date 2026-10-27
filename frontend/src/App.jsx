@@ -125,6 +125,11 @@ export default function App() {
   const isDbConnected = backendData?.database === 'connected';
   const isAiConfigured = backendData?.ai?.includes('configured');
 
+  const pendingCount = articles.filter(
+    (a) => a.processing_status === 'pending' || a.processing_status === 'failed' || a.processing_status === 'processing'
+  ).length;
+  const completedCount = articles.filter((a) => a.processing_status === 'completed').length;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
       {/* Header / Navbar */}
@@ -226,9 +231,9 @@ export default function App() {
           <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
             <button
               onClick={handleProcessAI}
-              disabled={isProcessingAI || !isDbConnected}
+              disabled={isProcessingAI || !isDbConnected || pendingCount === 0}
               className={`px-4 py-2.5 rounded-xl text-xs font-semibold transition flex items-center space-x-2 shadow-lg shadow-cyan-500/10 ${
-                isProcessingAI || !isDbConnected
+                isProcessingAI || !isDbConnected || pendingCount === 0
                   ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                   : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white'
               }`}
@@ -236,11 +241,15 @@ export default function App() {
               {isProcessingAI ? (
                 <>
                   <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                  <span>Analyzing with Gemini...</span>
+                  <span>Analyzing 3 articles in parallel (~5-8s)...</span>
+                </>
+              ) : pendingCount === 0 ? (
+                <>
+                  <span>✅ All Articles Analyzed ({completedCount})</span>
                 </>
               ) : (
                 <>
-                  <span>✨ Process with AI (Trial: 3 Articles)</span>
+                  <span>✨ Process with AI (Next 3 • {pendingCount} pending)</span>
                 </>
               )}
             </button>
