@@ -7,6 +7,8 @@ import pool from './db/index.js';
 import { ingestLatestNews } from './services/newsIngester.js';
 import { processPendingArticles, retrySingleArticle } from './services/articlePipeline.js';
 import { generateEpisode, getAllEpisodes, getEpisodeById } from './services/episodePipeline.js';
+import { answerEpisodeQuestion } from './services/ragAnswerer.js';
+import { indexEpisode } from './services/ragIndexer.js';
 
 dotenv.config();
 
@@ -29,7 +31,7 @@ app.use('/audio', express.static(path.join(__dirname, '../public/audio')));
 app.get('/', (req, res) => {
   res.json({
     message: 'Welcome to the Tech Innovation News Show API',
-    phase: 'Phase 4: Episode Generation & Audio Active',
+    phase: 'Phase 5: Grounded RAG "Ask This Episode" Active',
     endpoints: {
       health: 'GET /health',
       sources: 'GET /api/sources',
@@ -40,7 +42,9 @@ app.get('/', (req, res) => {
       episodes: 'GET /api/episodes',
       episodeLatest: 'GET /api/episodes/latest',
       episodeById: 'GET /api/episodes/:id',
-      generateEpisode: 'POST /api/episodes/generate'
+      generateEpisode: 'POST /api/episodes/generate',
+      askEpisode: 'POST /api/episodes/:id/ask',
+      reindexEpisode: 'POST /api/episodes/:id/reindex'
     }
   });
 });
@@ -235,6 +239,46 @@ app.get('/api/episodes/:id', async (req, res) => {
     res.json({ episode });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch episode', details: err.message });
+  }
+});
+
+// ─── RAG Q&A Routes (Phase 5) ─────────────────────────────────────────────────
+
+// POST /api/episodes/:id/ask - Grounded Q&A against episode transcript & sources
+app.post('/api/episodes/:id/ask', async (req, res) => {
+  try {
+    const episodeId = parseInt(req.params.id, 10);
+    const { question } = req.body;
+
+    if (!question || typeof question !== 'string') {
+      return res.status(400).json({ error: 'Please provide a valid question in the request body' });
+    }
+
+    const result = await answerEpisodeQuestion(episodeId, question);
+    res.json({
+      episodeId,
+      question,
+      answer: result.answer,
+      citations: result.citations,
+      confidence: result.confidence,
+      grounded: result.grounded
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to process question', details: err.message });
+  }
+});
+
+// POST /api/episodes/:id/reindex - Force re-index of an episode's chunks
+app.post('/api/episodes/:id/reindex', async (req, res) => {
+  try {
+    const episodeId = parseInt(req.params.id, 10);
+    const stats = await indexEpisode(episodeId);
+    res.json({
+      message: `Episode #${episodeId} reindexed successfully`,
+      stats
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Reindexing failed', details: err.message });
   }
 });
 

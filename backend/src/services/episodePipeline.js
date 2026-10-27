@@ -1,6 +1,7 @@
 import pool from '../db/index.js';
 import { generateEpisodeScript } from './episodeScriptGenerator.js';
 import { generateTTSAudio } from './ttsGenerator.js';
+import { indexEpisode } from './ragIndexer.js';
 
 /**
  * Idempotent episode generation pipeline.
@@ -109,6 +110,14 @@ export async function generateEpisode() {
   } catch (err) {
     // Non-fatal: episode is still usable even if linking partially fails
     console.error('Warning: failed to link some articles to episode:', err.message);
+  }
+
+  // ─── Stage 6: Index episode chunks for RAG search ─────────────────────────
+  try {
+    console.log(`Indexing episode ${episode.id} for RAG Q&A...`);
+    await indexEpisode(episode.id);
+  } catch (err) {
+    console.error('Warning: RAG indexing failed:', err.message);
   }
 
   return { episode, articleData: scriptData.articleData, cached: false };

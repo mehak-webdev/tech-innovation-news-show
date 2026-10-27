@@ -21,6 +21,12 @@ export default function App() {
   const [showTranscript, setShowTranscript] = useState(false);
   const audioRef = useRef(null);
 
+  // RAG Q&A state (Phase 5)
+  const [askQuestion, setAskQuestion] = useState('');
+  const [askLoading, setAskLoading] = useState(false);
+  const [askAnswer, setAskAnswer] = useState(null);
+  const [askError, setAskError] = useState(null);
+
   // Shared
   const [notification, setNotification] = useState(null);
   const [activeFilter, setActiveFilter] = useState('all');
@@ -84,6 +90,9 @@ export default function App() {
         const data = await response.json();
         setSelectedEpisode(data.episode);
         setShowTranscript(false);
+        setAskQuestion('');
+        setAskAnswer(null);
+        setAskError(null);
       }
     } catch (err) {
       console.error('Failed to fetch episode detail:', err);
@@ -174,6 +183,33 @@ export default function App() {
     } finally {
       clearTimeout(timeoutId);
       setIsGeneratingEpisode(false);
+    }
+  };
+
+  // ── Ask This Episode (RAG Q&A) ──────────────────────────────────────────────
+  const handleAskEpisode = async (customQ) => {
+    const q = (typeof customQ === 'string' ? customQ : askQuestion).trim();
+    if (!q || !selectedEpisode) return;
+    setAskQuestion(q);
+    setAskLoading(true);
+    setAskError(null);
+    setAskAnswer(null);
+
+    try {
+      const response = await fetch(`${apiUrl}/api/episodes/${selectedEpisode.id}/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to get answer');
+      }
+      setAskAnswer(data);
+    } catch (err) {
+      setAskError(err.message);
+    } finally {
+      setAskLoading(false);
     }
   };
 
@@ -549,6 +585,140 @@ export default function App() {
                     )}
                   </div>
                 )}
+
+                {/* ── Ask This Episode (RAG Q&A) ── */}
+                <div className="pt-5 border-t border-slate-800/80 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-base">💬</span>
+                      <h4 className="text-sm font-bold text-white">Ask This Episode</h4>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-950/80 border border-cyan-500/40 text-cyan-300">
+                        RAG Grounded
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-slate-400">Powered by pgvector + Gemini</span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Ask questions specifically about this broadcast. Answers are retrieved strictly from this episode's script and linked source articles.
+                  </p>
+
+                  {/* Sample Prompt Pills */}
+                  <div className="flex flex-wrap gap-2 text-[11px]">
+                    <span className="text-slate-500 py-1">Try:</span>
+                    {[
+                      'What are the key headlines in this show?',
+                      'What sources were cited in this broadcast?',
+                      'Explain the details of the hardware story.'
+                    ].map((pill, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => handleAskEpisode(pill)}
+                        disabled={askLoading}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 border border-slate-700 transition"
+                      >
+                        "{pill}"
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Input Form */}
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleAskEpisode();
+                    }}
+                    className="flex flex-col sm:flex-row gap-2"
+                  >
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        value={askQuestion}
+                        onChange={(e) => setAskQuestion(e.target.value.slice(0, 250))}
+                        placeholder="Ask a question about this episode's stories..."
+                        disabled={askLoading}
+                        className="w-full bg-slate-950/90 border border-slate-800 focus:border-cyan-500/80 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition pr-16"
+                      />
+                      <span className="absolute right-3 top-3 text-[10px] text-slate-500">
+                        {askQuestion.length}/250
+                      </span>
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={askLoading || !askQuestion.trim()}
+                      className={`px-5 py-2.5 rounded-xl text-xs font-semibold transition flex items-center justify-center space-x-1.5 flex-shrink-0 ${
+                        askLoading || !askQuestion.trim()
+                          ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                          : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold shadow-md shadow-cyan-500/20'
+                      }`}
+                    >
+                      {askLoading ? (
+                        <>
+                          <span className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></span>
+                          <span>Searching...</span>
+                        </>
+                      ) : (
+                        <span>Ask AI ↵</span>
+                      )}
+                    </button>
+                  </form>
+
+                  {/* Error display */}
+                  {askError && (
+                    <div className="p-3 rounded-lg bg-rose-950/30 border border-rose-500/30 text-xs text-rose-300">
+                      ⚠️ {askError}
+                    </div>
+                  )}
+
+                  {/* Answer Card */}
+                  {askAnswer && (
+                    <div className="bg-slate-950/90 border border-cyan-500/30 rounded-xl p-4 space-y-3 animate-fadeIn">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-cyan-400 font-semibold flex items-center space-x-1">
+                          <span>✨</span>
+                          <span>Grounded Answer</span>
+                        </span>
+                        {askAnswer.confidence && (
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                            askAnswer.confidence === 'high' ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'
+                          }`}>
+                            {askAnswer.confidence === 'high' ? 'High Confidence' : 'Moderate Match'}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">
+                        {askAnswer.answer}
+                      </p>
+
+                      {/* Citations */}
+                      {askAnswer.citations && askAnswer.citations.length > 0 && (
+                        <div className="pt-2 border-t border-slate-800/80">
+                          <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">
+                            📌 Cited Sources & Passages:
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {askAnswer.citations.map((cite, i) => (
+                              <a
+                                key={i}
+                                href={cite.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center space-x-1 px-2.5 py-1 rounded bg-slate-900 border border-slate-800 hover:border-cyan-500/40 text-[11px] text-cyan-300 transition"
+                              >
+                                <span className="line-clamp-1 max-w-[200px]">{cite.title}</span>
+                                <span>↗</span>
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="text-[10px] text-slate-500 pt-1">
+                        ℹ️ Answer generated strictly using this episode's transcript and verified article summaries. Verify facts with original sources above.
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

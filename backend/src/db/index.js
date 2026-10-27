@@ -1,7 +1,15 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
+
+// Fallback: load backend/.env if run from workspace root
+if (!process.env.DATABASE_URL) {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+}
 
 const { Pool } = pg;
 
