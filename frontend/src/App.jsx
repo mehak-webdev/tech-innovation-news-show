@@ -76,11 +76,16 @@ export default function App() {
   // 4. Trigger AI Article Processing (Trial: 3 articles)
   const handleProcessAI = async () => {
     setIsProcessingAI(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
     try {
       const response = await fetch(`${apiUrl}/api/articles/process?limit=3`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       const data = await response.json();
       if (data.stats) {
         setNotification({
@@ -90,10 +95,17 @@ export default function App() {
         await fetchArticles();
       } else if (data.message) {
         setNotification({ type: 'info', message: data.message });
+        await fetchArticles();
       }
     } catch (err) {
-      setNotification({ type: 'error', message: `AI Processing failed: ${err.message}` });
+      if (err.name === 'AbortError') {
+        setNotification({ type: 'error', message: 'Processing is taking longer than expected. Please refresh the page to see updated results.' });
+      } else {
+        setNotification({ type: 'error', message: `AI Processing failed: ${err.message}` });
+      }
+      await fetchArticles();
     } finally {
+      clearTimeout(timeoutId);
       setIsProcessingAI(false);
     }
   };

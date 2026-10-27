@@ -60,18 +60,29 @@ Respond strictly with a valid JSON object matching this schema:
   "importance_reason": "One concise sentence explaining why this score was assigned according to the rubric"
 }`;
 
-  const candidateModels = ['gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite'];
+  const candidateModels = ['gemini-3.5-flash', 'gemini-3.8-flash'];
   let lastError = null;
+
+  const withTimeout = (promise, ms) => {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Gemini API request timed out after ${ms / 1000}s`)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  };
 
   for (const modelName of candidateModels) {
     try {
-      const response = await ai.models.generateContent({
+      const generatePromise = ai.models.generateContent({
         model: modelName,
         contents: prompt,
         config: {
           responseMimeType: 'application/json'
         }
       });
+
+      // 10-second max timeout per model attempt
+      const response = await withTimeout(generatePromise, 10000);
 
       const responseText = response.text;
       if (!responseText) {
