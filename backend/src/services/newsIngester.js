@@ -30,8 +30,8 @@ export async function ingestLatestNews() {
       console.log(`Fetching feed for ${source.name} from ${source.feed_url}...`);
       const feed = await parser.parseURL(source.feed_url);
 
-      // Take the latest 10 items from each feed
-      const items = (feed.items || []).slice(0, 10);
+      // Take up to 25 latest items from each feed
+      const items = (feed.items || []).slice(0, 25);
 
       for (const item of items) {
         const articleUrl = item.link || item.guid;

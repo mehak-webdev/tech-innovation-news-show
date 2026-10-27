@@ -161,7 +161,7 @@ app.get('/api/articles', async (req, res) => {
       LEFT JOIN sources s ON a.source_id = s.id
       ${whereSQL}
       ${orderSQL}
-      LIMIT 50;
+      LIMIT 150;
     `;
 
     const result = await pool.query(queryText, queryParams);

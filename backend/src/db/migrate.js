@@ -64,6 +64,26 @@ export async function runMigration() {
         name: 'The Verge',
         feed_url: 'https://www.theverge.com/rss/index.xml',
         website_url: 'https://www.theverge.com'
+      },
+      {
+        name: 'Ars Technica',
+        feed_url: 'https://feeds.arstechnica.com/arstechnica/index',
+        website_url: 'https://arstechnica.com'
+      },
+      {
+        name: 'Wired',
+        feed_url: 'https://www.wired.com/feed/rss',
+        website_url: 'https://www.wired.com'
+      },
+      {
+        name: 'Engadget',
+        feed_url: 'https://www.engadget.com/rss.xml',
+        website_url: 'https://www.engadget.com'
+      },
+      {
+        name: 'MIT Tech Review',
+        feed_url: 'https://www.technologyreview.com/feed/',
+        website_url: 'https://www.technologyreview.com'
       }
     ];
 
