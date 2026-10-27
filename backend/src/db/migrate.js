@@ -104,7 +104,5 @@ export async function runMigration() {
   }
 }
 
-// Allow direct execution: `node src/db/migrate.js`
-if (import.meta.url === `file://${process.argv[1]}`.replace(/\\/g, '/')) {
-  runMigration();
-}
+runMigration();
+
