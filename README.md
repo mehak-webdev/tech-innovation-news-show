@@ -7,7 +7,8 @@ An automated technology news show platform that gathers daily tech news, generat
 ## Tech Stack
 - **Frontend:** React 18, Vite, Tailwind CSS
 - **Backend:** Node.js, Express (ES Modules)
-- **Database:** PostgreSQL (Planned for Phase 2)
+- **Database:** PostgreSQL (Neon Serverless or Local)
+- **Data Ingestion:** RSS Parser (`rss-parser`)
 - **AI / Media (Later Phases):** Article summarization, TTS audio narration, and RAG-based Q&A
 
 ---
@@ -20,12 +21,17 @@ tech_news_innovation_show/
 ├── .gitignore                   # Ignores dependencies, .env, and build artifacts
 ├── README.md                    # Project documentation & team setup guide
 │
-├── backend/                     # Express API Server
+├── backend/                     # Express API Server & Database Layer
 │   ├── .env.example             # Template for backend environment variables
 │   ├── .gitignore               # Backend-specific ignore rules
-│   ├── package.json             # Dependencies: express, cors, dotenv, nodemon
+│   ├── package.json             # Dependencies: express, cors, dotenv, nodemon, pg, rss-parser
 │   └── src/
-│       └── server.js            # Express server & GET /health endpoint
+│       ├── db/
+│       │   ├── index.js         # PostgreSQL connection pool with SSL support
+│       │   └── migrate.js       # SQL table schemas (sources, categories, articles)
+│       ├── services/
+│       │   └── newsIngester.js  # RSS ingestion & URL-based deduplication
+│       └── server.js            # Express server & API endpoints
 │
 └── frontend/                    # React + Vite Client
     ├── .env.example             # Template for frontend environment variables
@@ -36,7 +42,7 @@ tech_news_innovation_show/
     ├── tailwind.config.js       # Tailwind CSS configuration
     ├── vite.config.js           # Vite development server config (port 5173)
     └── src/
-        ├── App.jsx              # Main dashboard with live API health diagnostics
+        ├── App.jsx              # News feed dashboard, DB diagnostics, and ingestion control
         ├── index.css            # Tailwind directives
         └── main.jsx             # React DOM entry point
 ```
@@ -48,6 +54,7 @@ tech_news_innovation_show/
 ### Prerequisites
 - [Node.js](https://nodejs.org/) (version 18 or newer recommended)
 - [Git](https://git-scm.com/)
+- A PostgreSQL Database (e.g. Free [Neon Serverless Postgres](https://neon.tech) or local PostgreSQL)
 
 ---
 
@@ -76,6 +83,13 @@ Copy the `.env.example` templates into local `.env` files:
   ```
   *(or on macOS/Linux: `cp frontend/.env.example frontend/.env`)*
 
+In `backend/.env`, set:
+```text
+PORT=5000
+CLIENT_URL=http://localhost:5173
+DATABASE_URL=postgresql://<user>:<password>@<host>/<dbname>?sslmode=require
+```
+
 #### 3. Install Dependencies
 Run `npm install` inside both folders:
 
@@ -91,6 +105,15 @@ npm install
 cd ..
 ```
 
+#### 4. Run Database Migrations
+Once your `DATABASE_URL` is configured in `backend/.env`, create the tables and initial seed sources:
+
+```bash
+cd backend
+npm run migrate
+cd ..
+```
+
 ---
 
 ### Running the Application
@@ -103,7 +126,7 @@ cd backend
 npm run dev
 ```
 * **Runs at:** `http://localhost:5000`
-* **Health Check:** `http://localhost:5000/health` (returns JSON status)
+* **Health Check:** `http://localhost:5000/health` (reports server and database connectivity)
 
 #### Terminal 2 — Frontend Application
 ```bash
@@ -111,67 +134,36 @@ cd frontend
 npm run dev
 ```
 * **Runs at:** `http://localhost:5173`
-* Open your browser to `http://localhost:5173`. You should see the **Tech Innovation News Show** landing page with a green **"Backend Connected"** status pill.
+* Open your browser to `http://localhost:5173`. You will see the **Tech Innovation News Show** live feed with live status badges for both the API and PostgreSQL.
 
 ---
 
 ## API Endpoints Reference
 
-| Method | Endpoint | Description | Sample Response |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/` | API Welcome message & available routes | `{"message": "Welcome to the Tech Innovation News Show API"}` |
-| `GET` | `/health` | Server health & uptime check | `{"status": "ok", "service": "tech-news-backend", "timestamp": "..."}` |
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/` | API Welcome message & available routes |
+| `GET` | `/health` | Server & PostgreSQL connectivity status |
+| `GET` | `/api/sources` | Lists active news sources (TechCrunch, The Verge) |
+| `GET` | `/api/articles` | Returns the latest 25 ingested articles with source metadata |
+| `POST` | `/api/articles/ingest` | Triggers manual RSS ingestion and URL deduplication |
 
 ---
 
-## Team Collaboration Guide
+## Database Safety Guidelines
 
-To ensure both team members can work smoothly without stepping on each other's code:
-
-### 1. Branching Strategy
-- **Never commit directly to `main`.**
-- Create a feature branch for each task:
-  ```bash
-  # For backend features
-  git checkout -b feature/backend-<feature-name>
-
-  # For frontend features
-  git checkout -b feature/frontend-<feature-name>
-  ```
-
-### 2. Daily Workflow
-1. **Pull the latest changes before starting work:**
-   ```bash
-   git checkout main
-   git pull origin main
-   ```
-2. **Switch to your feature branch and bring it up to date:**
-   ```bash
-   git checkout feature/your-feature
-   git merge main
-   ```
-3. **Make your changes, test them locally, and commit:**
-   ```bash
-   git add .
-   git commit -m "feat: descriptive summary of changes"
-   ```
-4. **Push your branch to GitHub:**
-   ```bash
-   git push -u origin feature/your-feature
-   ```
-5. **Open a Pull Request (PR)** on GitHub targeting `main`. Have your partner review and approve before merging.
-
-### 3. Avoiding Conflicts
-- Keep changes scoped: Frontend work stays in `frontend/`, backend work stays in `backend/`.
-- Never commit `.env` files — each student maintains their own local `.env`.
+1. **Keep Secrets Out of Version Control:** Never commit database credentials or connection strings.
+2. **Local Environment Only:** Keep `DATABASE_URL` exclusively in `backend/.env`, which is ignored by `.gitignore`.
+3. **Commit Templates Only:** Keep `backend/.env.example` free of secret credentials.
+4. **Parameterized Queries:** Always use parameterized SQL placeholders (`$1`, `$2`) to prevent SQL Injection attacks.
 
 ---
 
 ## Project Roadmap
 
 - [x] **Phase 1: Project Initialization** (Git repo, backend scaffold with `GET /health`, frontend with Vite & Tailwind, live connectivity check).
-- [ ] **Phase 2: Database & Data Modeling** (PostgreSQL schema, migrations, connection pool).
-- [ ] **Phase 3: News Ingestion Pipeline** (Fetching, parsing, and storing raw tech articles).
+- [x] **Phase 2: Database Foundation & Ingestion Prototype** (PostgreSQL connection pool, migration scripts, RSS parsing with `rss-parser`, URL deduplication, and React Articles Feed UI).
+- [ ] **Phase 3: Automated Pipeline & Source Expansion** (Background cron jobs, additional tech feeds, content sanitization, and source filtering).
 - [ ] **Phase 4: AI Summarization & Script Generation** (Article deduplication, bullet summaries, daily show script).
 - [ ] **Phase 5: Audio Generation & Media Player** (Text-to-speech audio rendering, frontend episode player).
 - [ ] **Phase 6: Interactive Q&A ("Ask This Episode")** (Vector search / RAG for episode questioning).
