@@ -27,6 +27,10 @@ export default function App() {
   const [askAnswer, setAskAnswer] = useState(null);
   const [askError, setAskError] = useState(null);
 
+  // Analytics state (Phase 6)
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+
   // Shared
   const [notification, setNotification] = useState(null);
   const [activeFilter, setActiveFilter] = useState('all');
@@ -79,6 +83,22 @@ export default function App() {
       console.error('Failed to fetch episodes:', err);
     } finally {
       setLoadingEpisodes(false);
+    }
+  };
+
+  // ── Fetch platform analytics (Phase 6) ──────────────────────────────────────
+  const fetchAnalytics = async () => {
+    setLoadingAnalytics(true);
+    try {
+      const response = await fetch(`${apiUrl}/api/analytics`);
+      if (response.ok) {
+        const data = await response.json();
+        setAnalyticsData(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch analytics:', err);
+    } finally {
+      setLoadingAnalytics(false);
     }
   };
 
@@ -238,6 +258,7 @@ export default function App() {
   useEffect(() => { fetchArticles(); }, [apiUrl, activeFilter, sortBy]);
   useEffect(() => {
     if (activeTab === 'episodes') fetchEpisodes();
+    if (activeTab === 'analytics') fetchAnalytics();
   }, [activeTab]);
 
   const isDbConnected = backendData?.database === 'connected';
@@ -338,6 +359,12 @@ export default function App() {
             className={`px-5 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'episodes' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'}`}
           >
             🎙️ Episodes
+          </button>
+          <button
+            onClick={() => setActiveTab('analytics')}
+            className={`px-5 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'analytics' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            📊 Analytics Trends
           </button>
         </div>
 
@@ -764,11 +791,257 @@ export default function App() {
             )}
           </div>
         )}
+
+        {/* ════════════ ANALYTICS TAB ════════════ */}
+        {activeTab === 'analytics' && (
+          <div className="space-y-8 animate-fadeIn">
+            {/* Header with Refresh */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 border border-slate-800 p-5 rounded-2xl">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h3 className="text-base font-bold text-white">Editorial & Platform Analytics</h3>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-950/80 border border-cyan-500/40 text-cyan-300">
+                    Live from PostgreSQL
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  Automated aggregation of ingestion volumes, AI analysis coverage, category distribution, and importance scoring.
+                </p>
+              </div>
+              <button
+                onClick={fetchAnalytics}
+                disabled={loadingAnalytics}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center space-x-2 transition flex-shrink-0"
+              >
+                <span>{loadingAnalytics ? 'Refreshing...' : '🔄 Refresh Data'}</span>
+              </button>
+            </div>
+
+            {loadingAnalytics && !analyticsData ? (
+              <div className="py-24 text-center space-y-3">
+                <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                <p className="text-xs text-slate-400">Loading platform trends from PostgreSQL...</p>
+              </div>
+            ) : analyticsData ? (
+              <div className="space-y-8">
+                {/* 4 Top KPI Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* KPI 1 */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2">
+                    <span className="text-xs text-slate-400 font-medium">Total Stories Ingested</span>
+                    <div className="text-3xl font-extrabold text-white">
+                      {analyticsData.kpis.totalArticles}
+                    </div>
+                    <div className="text-[11px] text-slate-400 flex items-center space-x-1.5 pt-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                      <span>{analyticsData.kpis.pendingArticles} pending AI analysis</span>
+                    </div>
+                  </div>
+
+                  {/* KPI 2 */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2">
+                    <span className="text-xs text-slate-400 font-medium">AI Analysis Coverage</span>
+                    <div className="text-3xl font-extrabold text-cyan-400">
+                      {analyticsData.kpis.analysisRate}%
+                    </div>
+                    <div className="text-[11px] text-slate-400 flex items-center space-x-1.5 pt-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                      <span>{analyticsData.kpis.analyzedArticles} verified by Gemini</span>
+                    </div>
+                  </div>
+
+                  {/* KPI 3 */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2">
+                    <span className="text-xs text-slate-400 font-medium">Avg Story Importance</span>
+                    <div className="text-3xl font-extrabold text-amber-400 flex items-baseline space-x-1">
+                      <span>{analyticsData.kpis.avgImportanceScore}</span>
+                      <span className="text-xs text-slate-500 font-normal">/100</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 flex items-center space-x-1.5 pt-1">
+                      <span>⭐ Editorial Rubric Score</span>
+                    </div>
+                  </div>
+
+                  {/* KPI 4 */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2">
+                    <span className="text-xs text-slate-400 font-medium">Audio Broadcasts</span>
+                    <div className="text-3xl font-extrabold text-blue-400">
+                      {analyticsData.kpis.totalEpisodes}
+                    </div>
+                    <div className="text-[11px] text-slate-400 flex items-center space-x-1.5 pt-1">
+                      <span>🎙️ ~{analyticsData.kpis.totalAudioMinutes} min total spoken audio</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Grid: Category Distribution & Source Breakdown */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Category Distribution */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 space-y-5">
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                      <div>
+                        <h4 className="text-sm font-bold text-white">Topic & Category Distribution</h4>
+                        <p className="text-[11px] text-slate-400">Concentration across AI, Hardware, Security & Cloud</p>
+                      </div>
+                      <span className="text-xs text-slate-500 font-mono">{analyticsData.categories.length} Categories</span>
+                    </div>
+
+                    {analyticsData.categories.length > 0 ? (
+                      <div className="space-y-4">
+                        {analyticsData.categories.map((cat, idx) => {
+                          const maxCount = Math.max(...analyticsData.categories.map(c => c.storyCount), 1);
+                          const percentage = Math.round((cat.storyCount / maxCount) * 100);
+                          return (
+                            <div key={idx} className="space-y-1.5">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-slate-200 font-medium">{cat.category}</span>
+                                <div className="flex items-center space-x-3 text-slate-400">
+                                  <span>{cat.storyCount} stories</span>
+                                  <span className="text-cyan-400 font-mono">avg {cat.avgScore}</span>
+                                </div>
+                              </div>
+                              <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+                                <div
+                                  className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full transition-all duration-500"
+                                  style={{ width: `${percentage}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-xs text-slate-500">
+                        No category data yet. Process pending articles to generate category metrics.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* News Outlets Comparison */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 space-y-5">
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                      <div>
+                        <h4 className="text-sm font-bold text-white">Source Coverage & Output</h4>
+                        <p className="text-[11px] text-slate-400">Coverage volume and average impact by news outlet</p>
+                      </div>
+                      <span className="text-xs text-slate-500 font-mono">{analyticsData.sources.length} Feeds</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {analyticsData.sources.map((src, idx) => (
+                        <div key={idx} className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-bold text-white">{src.sourceName}</span>
+                            <span className="text-xs font-semibold text-cyan-400 bg-cyan-950/80 border border-cyan-500/30 px-2 py-0.5 rounded">
+                              ⭐ {src.avgScore}
+                            </span>
+                          </div>
+                          <div className="space-y-1 text-xs text-slate-400">
+                            <div className="flex justify-between">
+                              <span>Total Ingested:</span>
+                              <span className="text-slate-200 font-medium">{src.totalStories}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>AI Analyzed:</span>
+                              <span className="text-emerald-400 font-medium">{src.analyzedStories}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Featured in Shows:</span>
+                              <span className="text-blue-400 font-medium">{src.episodesFeaturedIn}</span>
+                            </div>
+                          </div>
+                          <a
+                            href={src.websiteUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center space-x-1 text-[11px] text-cyan-400 hover:text-cyan-300 font-medium pt-1"
+                          >
+                            <span>Visit feed site</span>
+                            <span>↗</span>
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Editorial Leaderboard: Top 5 Highest Impact Stories */}
+                <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                    <div>
+                      <h4 className="text-sm font-bold text-white">🏆 Editorial Leaderboard — Highest Rated Stories</h4>
+                      <p className="text-[11px] text-slate-400">Ranked by Gemini objective evaluation rubric (1–100)</p>
+                    </div>
+                    <span className="text-xs text-slate-500 font-mono">Top 5 Stories</span>
+                  </div>
+
+                  <div className="space-y-3">
+                    {analyticsData.topStories.map((story, i) => (
+                      <div
+                        key={story.id}
+                        className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 hover:border-slate-700 transition flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+                      >
+                        <div className="flex items-start space-x-3.5">
+                          <span className="w-6 h-6 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+                            {i + 1}
+                          </span>
+                          <div className="space-y-1">
+                            <div className="flex items-center space-x-2 flex-wrap gap-1">
+                              <span className="text-xs text-cyan-400 font-semibold">{story.sourceName}</span>
+                              {story.category && (
+                                <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-400">
+                                  {story.category}
+                                </span>
+                              )}
+                              {story.author && (
+                                <span className="text-[10px] text-slate-500">by {story.author}</span>
+                              )}
+                            </div>
+                            <h5 className="text-xs md:text-sm font-medium text-slate-100 line-clamp-1">
+                              {story.title}
+                            </h5>
+                            {story.importanceReason && (
+                              <p className="text-[11px] text-slate-400 italic line-clamp-1">
+                                "{story.importanceReason}"
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-3 self-end md:self-center flex-shrink-0">
+                          <span className="px-3 py-1 rounded-lg text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                            ⭐ {story.importanceScore} / 100
+                          </span>
+                          <a
+                            href={story.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-1 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+                          >
+                            Read ↗
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-16 bg-slate-900/40 border border-slate-800/60 rounded-2xl p-8 space-y-4">
+                <div className="text-4xl">📊</div>
+                <h3 className="text-base font-bold text-white">No Analytics Data Yet</h3>
+                <p className="text-xs text-slate-400 max-w-md mx-auto">
+                  Click "Refresh Data" or ingest articles from the Articles Feed to generate live trends.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </main>
 
       {/* ── Footer ── */}
       <footer className="border-t border-slate-800/80 py-6 text-center space-y-1">
-        <p className="text-xs text-slate-500">Tech Innovation News Show · Phase 4: Episode Generation & Audio Player</p>
+        <p className="text-xs text-slate-500">Tech Innovation News Show · Phase 6: Analytics Dashboard & Production Architecture</p>
         <p className="text-[11px] text-slate-600">🤖 AI-generated content. Not editorially reviewed. Verify facts with original sources.</p>
       </footer>
     </div>

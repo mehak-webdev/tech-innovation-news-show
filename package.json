@@ -1,0 +1,28 @@
+{
+  "name": "tech-innovation-news-show",
+  "version": "1.0.0",
+  "description": "Automated AI-Powered Tech News & Daily Innovation Podcast Show",
+  "scripts": {
+    "start:backend": "npm --prefix backend start",
+    "dev:backend": "npm --prefix backend run dev",
+    "build:frontend": "npm --prefix frontend run build",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "migrate": "npm --prefix backend run migrate",
+    "migrate:phase3": "npm --prefix backend run migrate:phase3",
+    "migrate:phase4": "npm --prefix backend run migrate:phase4",
+    "migrate:phase5": "npm --prefix backend run migrate:phase5"
+  },
+  "keywords": [
+    "react",
+    "vite",
+    "express",
+    "postgresql",
+    "neon",
+    "pgvector",
+    "gemini",
+    "rag",
+    "tts"
+  ],
+  "author": "mehak-webdev",
+  "license": "ISC"
+}

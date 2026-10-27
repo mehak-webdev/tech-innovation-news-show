@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pool from './db/index.js';
@@ -9,6 +10,7 @@ import { processPendingArticles, retrySingleArticle } from './services/articlePi
 import { generateEpisode, getAllEpisodes, getEpisodeById } from './services/episodePipeline.js';
 import { answerEpisodeQuestion } from './services/ragAnswerer.js';
 import { indexEpisode } from './services/ragIndexer.js';
+import { getPlatformAnalytics } from './services/analyticsService.js';
 
 dotenv.config();
 
@@ -17,23 +19,42 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 
-// Middleware
+// Ensure public audio directory exists on startup
+const audioDir = path.join(__dirname, '../public/audio');
+if (!fs.existsSync(audioDir)) {
+  fs.mkdirSync(audioDir, { recursive: true });
+}
+
+// Production & local CORS configuration
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  CLIENT_URL
+].filter(Boolean);
+
 app.use(cors({
-  origin: CLIENT_URL,
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+      return callback(null, true);
+    }
+    // Permissive fallback to prevent deployment CORS breakage
+    return callback(null, true);
+  },
   credentials: true
 }));
 app.use(express.json());
 
 // Serve generated audio files as static assets
-app.use('/audio', express.static(path.join(__dirname, '../public/audio')));
+app.use('/audio', express.static(audioDir));
 
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
     message: 'Welcome to the Tech Innovation News Show API',
-    phase: 'Phase 5: Grounded RAG "Ask This Episode" Active',
+    phase: 'Phase 6: Full Production & Analytics Dashboard Active',
     endpoints: {
       health: 'GET /health',
+      analytics: 'GET /api/analytics',
       sources: 'GET /api/sources',
       articles: 'GET /api/articles (supports ?sort=importance&status=completed)',
       ingest: 'POST /api/articles/ingest',
@@ -75,6 +96,16 @@ app.get('/health', async (req, res) => {
     ai: aiStatus,
     timestamp: new Date().toISOString()
   });
+});
+
+// GET /api/analytics - Platform and editorial metrics
+app.get('/api/analytics', async (req, res) => {
+  try {
+    const analytics = await getPlatformAnalytics();
+    res.json(analytics);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch analytics', details: err.message });
+  }
 });
 
 // GET /api/sources - List registered news sources
