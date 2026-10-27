@@ -180,6 +180,8 @@ app.post('/api/articles/:id/retry', async (req, res) => {
 
 // POST /api/episodes/generate - Trigger episode generation (idempotent: one per day)
 app.post('/api/episodes/generate', async (req, res) => {
+  req.setTimeout(120000);
+  res.setTimeout(120000);
   try {
     const result = await generateEpisode();
     const statusCode = result.error ? 500 : 200;

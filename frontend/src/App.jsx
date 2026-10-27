@@ -144,10 +144,15 @@ export default function App() {
   const handleGenerateEpisode = async () => {
     setIsGeneratingEpisode(true);
     setSelectedEpisode(null);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 90000);
     try {
       const response = await fetch(`${apiUrl}/api/episodes/generate`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       const data = await response.json();
       if (data.episode?.status === 'audio_ready') {
         showNotification('success', `Episode generated! "${data.episode.title}" is ready to play.`);
@@ -161,8 +166,13 @@ export default function App() {
         await fetchEpisodes();
       }
     } catch (err) {
-      showNotification('error', `Episode generation failed: ${err.message}`);
+      if (err.name === 'AbortError') {
+        showNotification('info', 'Generation is taking slightly longer in the background. Please wait a few seconds and refresh.');
+      } else {
+        showNotification('error', `Episode generation failed: ${err.message}`);
+      }
     } finally {
+      clearTimeout(timeoutId);
       setIsGeneratingEpisode(false);
     }
   };

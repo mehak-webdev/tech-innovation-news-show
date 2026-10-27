@@ -27,19 +27,14 @@ export async function generateEpisode() {
   if (existing.rowCount > 0) {
     const ep = existing.rows[0];
 
-    // If it completed successfully, return it
+    // If it completed successfully and has audio, return it
     if (ep.status === 'audio_ready') {
       return { episode: ep, cached: true };
     }
 
-    // If it previously failed, delete it and try again fresh
-    if (ep.status === 'failed') {
-      await pool.query('DELETE FROM episodes WHERE id = $1', [ep.id]);
-      console.log(`Removed failed episode ${ep.id} for ${episodeDate}, retrying...`);
-    } else {
-      // In progress or script_ready — return as-is
-      return { episode: ep, cached: true };
-    }
+    // Any non-completed episode (failed, draft, or script_ready) should be replaced
+    await pool.query('DELETE FROM episodes WHERE id = $1', [ep.id]);
+    console.log(`Cleaned up incomplete episode ${ep.id} (status: ${ep.status}) for ${episodeDate}, regenerating fresh...`);
   }
 
   // ─── Stage 2: Insert draft episode row ────────────────────────────────────
@@ -164,3 +159,4 @@ export async function getEpisodeById(id) {
 
   return { ...episode, articles: articlesResult.rows };
 }
+

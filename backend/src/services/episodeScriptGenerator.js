@@ -4,8 +4,8 @@ import pool from '../db/index.js';
 
 dotenv.config();
 
-const MIN_ARTICLES = 3;
-const MAX_ARTICLES = 5;
+const MIN_ARTICLES = 2;
+const MAX_ARTICLES = 3;
 
 function getGenAIClient() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -79,29 +79,25 @@ Key Points: ${keyPoints.map(p => `- ${p}`).join('\n')}
 `.trim();
   }).join('\n\n---\n\n');
 
-  const prompt = `You are a professional broadcast journalist writing a daily technology news radio script.
+  const prompt = `You are a professional broadcast journalist host of the daily "Tech Innovation News Show".
 
-Write a polished, engaging, spoken-word broadcast script for the following ${articles.length} tech news stories. 
-The script should be approximately 3 minutes when read aloud (roughly 450-500 words).
+Write a polished, engaging, spoken-word radio broadcast script covering today's top ${articles.length} tech stories.
+The script should be concise, energetic, and approximately 1.5 minutes when read aloud (roughly 200 to 250 words total).
 
 REQUIRED STRUCTURE:
-1. A warm, energetic INTRODUCTION that greets listeners and previews today's stories.
-2. For each story: a brief TRANSITION, then the story segment that naturally integrates the summary and key points in conversational broadcast style. End each story with: "For the full story, visit [source name]."
-3. A warm CLOSING OUTRO that thanks listeners and signs off.
+1. GREETING & INTRO: Warm greeting mentioning today's date (${formattedDate}) and a quick one-sentence hook for what's ahead.
+2. STORY SEGMENTS: For each story, provide a smooth transition sentence, a concise 2-3 sentence overview of the news, and cite the source (e.g. "according to TechCrunch" or "as reported by The Verge").
+3. SIGN-OFF: Brief outro thanking listeners and inviting them to read full source links on the dashboard.
 
 IMPORTANT RULES:
-- Write in spoken English — no bullet points, no markdown, no headers.
-- Use conversational, accessible language suitable for a general tech-savvy audience.
-- Each story should flow naturally into the next with a smooth transition phrase.
-- Keep attributions brief but clear (e.g. "According to TechCrunch..." or "The Verge reports...").
-- Do NOT invent facts, statistics, or quotes not present in the summaries.
-
-TODAY'S DATE: ${formattedDate}
+- Write in natural spoken English — absolutely no bullet points, headers, or markdown symbols.
+- Keep the tone professional, informative, and lively.
+- Total word count MUST be under 260 words for clear, clean audio pacing.
 
 STORIES TO COVER:
 ${storySections}
 
-Now write the complete episode script as plain flowing text:`;
+Now write the full spoken broadcast script as continuous flowing text:`;
 
   // 3. Call Gemini to generate the script
   const ai = getGenAIClient();
@@ -139,3 +135,4 @@ Now write the complete episode script as plain flowing text:`;
 
   throw lastError || new Error('All Gemini models failed during script generation');
 }
+

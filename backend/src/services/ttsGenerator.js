@@ -79,7 +79,7 @@ export async function generateTTSAudio(script, episodeDate) {
             }
           }
         }),
-        30000
+        75000
       );
 
       // Extract audio data from the response
@@ -89,21 +89,23 @@ export async function generateTTSAudio(script, episodeDate) {
         throw new Error('TTS model returned no audio data in response');
       }
 
-      // Decode base64 audio and save as WAV
+      // Decode base64 audio
       const audioBuffer = Buffer.from(audioData, 'base64');
 
       if (audioBuffer.length < 1000) {
         throw new Error(`Audio buffer is too small (${audioBuffer.length} bytes) — likely an empty or error response`);
       }
 
-      // Write WAV file: Gemini TTS returns raw PCM data, wrap in WAV header
-      const wavBuffer = addWavHeader(audioBuffer, 24000, 1, 16);
+      // Check if the model already returned a complete WAV file (starts with 'RIFF')
+      const isAlreadyWav = audioBuffer.slice(0, 4).toString('ascii') === 'RIFF';
+      const wavBuffer = isAlreadyWav ? audioBuffer : addWavHeader(audioBuffer, 24000, 1, 16);
+
       fs.writeFileSync(filePath, wavBuffer);
 
-      console.log(`Audio saved to: ${filePath} (${Math.round(wavBuffer.length / 1024)} KB)`);
+      console.log(`Audio saved to: ${filePath} (${Math.round(wavBuffer.length / 1024)} KB, isAlreadyWav: ${isAlreadyWav})`);
 
-      // Estimate duration: PCM16 at 24kHz mono = 48000 bytes/second
-      const durationSeconds = Math.round(audioBuffer.length / 48000);
+      // Estimate duration: standard 24kHz mono PCM WAV is ~48000 bytes/sec
+      const durationSeconds = Math.max(1, Math.round(audioBuffer.length / 48000));
 
       return { filename, audioUrl, filePath, durationSeconds };
     } catch (err) {
@@ -148,3 +150,4 @@ function addWavHeader(pcmData, sampleRate = 24000, numChannels = 1, bitsPerSampl
 
   return Buffer.concat([header, pcmData]);
 }
+
