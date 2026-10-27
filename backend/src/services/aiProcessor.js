@@ -60,40 +60,26 @@ Respond strictly with a valid JSON object matching this schema:
   "importance_reason": "One concise sentence explaining why this score was assigned according to the rubric"
 }`;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json'
-      }
-    });
+  const candidateModels = ['gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite'];
+  let lastError = null;
 
-    const responseText = response.text;
-    if (!responseText) {
-      throw new Error('Received empty response from Gemini model');
-    }
-
-    const parsed = JSON.parse(responseText);
-
-    return {
-      summary: (parsed.summary || cleanSummary || '').trim(),
-      category: (parsed.category || 'General Technology').trim(),
-      key_points: Array.isArray(parsed.key_points) ? parsed.key_points : [parsed.key_points].filter(Boolean),
-      importance_score: Math.min(100, Math.max(1, parseInt(parsed.importance_score, 10) || 50)),
-      importance_reason: (parsed.importance_reason || 'Standard technology news event').trim()
-    };
-  } catch (err) {
-    // Graceful fallback to gemini-1.5-flash if 2.5-flash is temporarily unavailable in user's region
-    if (err.message && (err.message.includes('not found') || err.message.includes('404') || err.message.includes('supported'))) {
-      const fallbackResponse = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
+  for (const modelName of candidateModels) {
+    try {
+      const response = await ai.models.generateContent({
+        model: modelName,
         contents: prompt,
         config: {
           responseMimeType: 'application/json'
         }
       });
-      const parsed = JSON.parse(fallbackResponse.text);
+
+      const responseText = response.text;
+      if (!responseText) {
+        throw new Error('Received empty response from Gemini model');
+      }
+
+      const parsed = JSON.parse(responseText);
+
       return {
         summary: (parsed.summary || cleanSummary || '').trim(),
         category: (parsed.category || 'General Technology').trim(),
@@ -101,7 +87,12 @@ Respond strictly with a valid JSON object matching this schema:
         importance_score: Math.min(100, Math.max(1, parseInt(parsed.importance_score, 10) || 50)),
         importance_reason: (parsed.importance_reason || 'Standard technology news event').trim()
       };
+    } catch (err) {
+      console.warn(`Model ${modelName} returned error: ${err.message?.slice(0, 80)}. Retrying next candidate...`);
+      lastError = err;
     }
-    throw err;
   }
+
+  throw lastError || new Error('All candidate Gemini models failed.');
 }
+
