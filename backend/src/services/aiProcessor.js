@@ -60,7 +60,12 @@ Respond strictly with a valid JSON object matching this schema:
   "importance_reason": "One concise sentence explaining why this score was assigned according to the rubric"
 }`;
 
-  const candidateModels = ['gemini-3.5-flash', 'gemini-3.8-flash'];
+  const candidateModels = [
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-3.8-flash'
+  ];
   let lastError = null;
 
   const withTimeout = (promise, ms) => {

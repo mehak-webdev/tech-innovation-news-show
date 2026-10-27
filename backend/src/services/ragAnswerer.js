@@ -94,9 +94,14 @@ ${question}
 
 CONCISE FACTUAL ANSWER:`;
 
-  // 5. Generate answer using Gemini
+  // 5. Generate answer using Gemini (prioritize fast, high-quota models)
   const ai = getGenAIClient();
-  const candidateModels = ['gemini-3.5-flash', 'gemini-3.8-flash'];
+  const candidateModels = [
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-3.8-flash'
+  ];
   let lastError = null;
 
   for (const modelName of candidateModels) {

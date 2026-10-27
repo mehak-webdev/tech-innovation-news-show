@@ -101,7 +101,12 @@ Now write the full spoken broadcast script as continuous flowing text:`;
 
   // 3. Call Gemini to generate the script
   const ai = getGenAIClient();
-  const candidateModels = ['gemini-3.5-flash', 'gemini-3.8-flash'];
+  const candidateModels = [
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-3.8-flash'
+  ];
   let lastError = null;
 
   for (const modelName of candidateModels) {
