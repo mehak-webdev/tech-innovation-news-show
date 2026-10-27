@@ -1,12 +1,16 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import pool from './db/index.js';
 import { ingestLatestNews } from './services/newsIngester.js';
 import { processPendingArticles, retrySingleArticle } from './services/articlePipeline.js';
+import { generateEpisode, getAllEpisodes, getEpisodeById } from './services/episodePipeline.js';
 
 dotenv.config();
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
@@ -18,18 +22,25 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Serve generated audio files as static assets
+app.use('/audio', express.static(path.join(__dirname, '../public/audio')));
+
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
     message: 'Welcome to the Tech Innovation News Show API',
-    phase: 'Phase 3: AI-Powered Article Processing Active',
+    phase: 'Phase 4: Episode Generation & Audio Active',
     endpoints: {
       health: 'GET /health',
       sources: 'GET /api/sources',
       articles: 'GET /api/articles (supports ?sort=importance&status=completed)',
       ingest: 'POST /api/articles/ingest',
       process: 'POST /api/articles/process?limit=3',
-      retry: 'POST /api/articles/:id/retry'
+      retry: 'POST /api/articles/:id/retry',
+      episodes: 'GET /api/episodes',
+      episodeLatest: 'GET /api/episodes/latest',
+      episodeById: 'GET /api/episodes/:id',
+      generateEpisode: 'POST /api/episodes/generate'
     }
   });
 });
@@ -162,6 +173,66 @@ app.post('/api/articles/:id/retry', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: 'Retry failed', details: err.message });
+  }
+});
+
+// ─── Episode Routes ───────────────────────────────────────────────────────────
+
+// POST /api/episodes/generate - Trigger episode generation (idempotent: one per day)
+app.post('/api/episodes/generate', async (req, res) => {
+  try {
+    const result = await generateEpisode();
+    const statusCode = result.error ? 500 : 200;
+    res.status(statusCode).json({
+      message: result.cached ? 'Returned existing episode' : 'Episode generated successfully',
+      episode: result.episode,
+      articleData: result.articleData || undefined,
+      error: result.error || undefined
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Episode generation failed', details: err.message });
+  }
+});
+
+// GET /api/episodes - List all episodes
+app.get('/api/episodes', async (req, res) => {
+  try {
+    const episodes = await getAllEpisodes();
+    res.json({ count: episodes.length, episodes });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch episodes', details: err.message });
+  }
+});
+
+// GET /api/episodes/latest - Fetch the most recent audio-ready episode
+app.get('/api/episodes/latest', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id FROM episodes
+      WHERE status = 'audio_ready'
+      ORDER BY episode_date DESC
+      LIMIT 1;
+    `);
+    if (result.rowCount === 0) {
+      return res.json({ episode: null, message: 'No audio-ready episodes found yet.' });
+    }
+    const episode = await getEpisodeById(result.rows[0].id);
+    res.json({ episode });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch latest episode', details: err.message });
+  }
+});
+
+// GET /api/episodes/:id - Fetch single episode with full script and linked articles
+app.get('/api/episodes/:id', async (req, res) => {
+  try {
+    const episode = await getEpisodeById(req.params.id);
+    if (!episode) {
+      return res.status(404).json({ error: `Episode with ID ${req.params.id} not found` });
+    }
+    res.json({ episode });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch episode', details: err.message });
   }
 });
 

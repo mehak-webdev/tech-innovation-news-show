@@ -1,0 +1,2 @@
+# This file keeps the audio directory tracked by Git.
+# Audio .wav files are not committed — they are generated at runtime.
