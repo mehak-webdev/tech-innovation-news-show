@@ -359,6 +359,35 @@ After deploying to production, verify these 6 user journeys:
 
 ---
 
+## Phase 3 Architecture: Persistent Storage, Canonical Categories & Grounded RAG
+
+### 1. Persistent Audio Object Storage (S3 / Cloudflare R2 / Local Fallback)
+- **Dual-Mode Operation:** Audio generation uses `@aws-sdk/client-s3`. If `S3_BUCKET_NAME`, `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY` are provided, generated WAV files are uploaded directly to S3 or Cloudflare R2 with verification. If unconfigured, the system automatically falls back to local disk storage (`backend/public/audio/`).
+- **Exact WAV Metadata Parsing:** Exact duration is parsed directly from binary RIFF/WAVE chunk headers (`dataSize / byteRate`), eliminating duration drift and imprecise script-based estimation.
+- **HTTP 206 Streaming Endpoint:** Audio is streamed to clients via `GET /api/episodes/:id/audio` with full HTTP `Range` request support, enabling scrubbing, seeking, and low-latency audio playback in standard browser players.
+- **Upload Safety & Atomicity:** Episodes are never marked `completed` or `audio_ready` unless the audio upload is verified. Temporary files are preserved if upload fails, and only cleaned up after durable persistence.
+
+### 2. Canonical News Categorization in PostgreSQL
+- **Database Normalization:** All articles are linked via foreign key `articles.category_id` to standard entries in the `categories` table:
+  1. `AI & Machine Learning` (`ai-ml`)
+  2. `Software & Cloud` (`software-cloud`)
+  3. `Hardware & Devices` (`hardware-devices`)
+  4. `Cybersecurity` (`cybersecurity`)
+  5. `Startups & Venture` (`startups-venture`)
+  6. `General Innovation` (`general-innovation`)
+  7. `Uncategorized` (`uncategorized`)
+- **Deterministic Alias Mapper:** Incoming AI strings and RSS tags are normalized and mapped through keyword aliases (e.g., `LLM`, `Deep Learning`, `OpenAI` $\to$ `AI & Machine Learning`; `Kubernetes`, `DevOps`, `Linux` $\to$ `Software & Cloud`; `Ransomware`, `Zero-Day` $\to$ `Cybersecurity`).
+- **PostgreSQL Join Analytics:** `analyticsService.js` joins `categories c ON a.category_id = c.id` so editorial charts reflect database-enforced canonical categories rather than arbitrary free-form strings.
+
+### 3. Reliable, Grounded RAG with pgvector
+- **Embedding Dimensions:** Validated strictly to 768 dimensions matching `vector(768)` in PostgreSQL `episode_chunks`.
+- **Metric Consistency:** Correctly aligns PostgreSQL `pgvector` cosine distance (`<=>`) with cosine similarity ($1 - \text{distance}$).
+- **Episode Isolation:** Retrieval strictly filters by `WHERE episode_id = $2`, preventing cross-episode context leaks.
+- **Strict Guardrails & Safe Refusal:** When retrieval yields zero chunks or top similarity $< 0.50$, the system returns an honest out-of-scope refusal without making calls to Gemini, preventing hallucinations and conserving quota.
+- **Prompt Injection Defense:** Retrieved passages are quarantined inside XML tags (`<source_passages><passage id="..." source="...">...</passage></source_passages>`) with security directives instructing the LLM to treat retrieved data strictly as untrusted source material.
+
+---
+
 ## Security & Reliability Design
 
 1. **Zero Secret Leaks:** API keys and database credentials exist strictly on the backend server. The client-side bundle contains no secret tokens.

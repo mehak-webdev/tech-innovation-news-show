@@ -27,15 +27,16 @@ export async function getPlatformAnalytics() {
     WHERE status = 'audio_ready';
   `;
 
-  // 3. Category Breakdown (Stories per category + average score)
+  // 3. Category Breakdown (Stories per canonical category + average score)
   const categoryQuery = `
     SELECT
-      COALESCE(a.ai_category, 'Uncategorized') AS category,
+      COALESCE(c.name, a.ai_category, 'Uncategorized') AS category,
       COUNT(a.id) AS story_count,
       ROUND(AVG(a.importance_score), 1) AS avg_score
     FROM articles a
+    LEFT JOIN categories c ON a.category_id = c.id
     WHERE a.processing_status = 'completed'
-    GROUP BY a.ai_category
+    GROUP BY COALESCE(c.name, a.ai_category, 'Uncategorized')
     ORDER BY story_count DESC, avg_score DESC
     LIMIT 8;
   `;

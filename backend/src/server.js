@@ -8,6 +8,7 @@ import pool from './db/index.js';
 import { ingestLatestNews } from './services/newsIngester.js';
 import { processPendingArticles, retrySingleArticle } from './services/articlePipeline.js';
 import { generateEpisode, getAllEpisodes, getEpisodeById } from './services/episodePipeline.js';
+import { streamAudioResponse, getStorageDiagnostics } from './services/audioStorage.js';
 import { answerEpisodeQuestion } from './services/ragAnswerer.js';
 import { indexEpisode } from './services/ragIndexer.js';
 import { getPlatformAnalytics } from './services/analyticsService.js';
@@ -165,12 +166,15 @@ app.get('/health', async (req, res) => {
     ? 'active'
     : 'missing (protected routes blocked)';
 
+  const storageDiagnostics = getStorageDiagnostics();
+
   res.status(200).json({
     status: 'ok',
     service: 'tech-news-backend',
     database: dbStatus,
     ai: aiStatus,
     operatorAuth: operatorAuthStatus,
+    storage: storageDiagnostics,
     timestamp: new Date().toISOString()
   });
 });
@@ -423,6 +427,19 @@ app.get('/api/episodes/:id', validateIdParam('id'), async (req, res, next) => {
   }
 });
 
+// GET /api/episodes/:id/audio - Stream episode audio with HTTP 206 Range support (Public)
+app.get('/api/episodes/:id/audio', validateIdParam('id'), async (req, res, next) => {
+  try {
+    const episode = await getEpisodeById(req.params.id);
+    if (!episode) {
+      return res.status(404).json({ error: 'Not Found', message: `Episode with ID ${req.params.id} not found` });
+    }
+    await streamAudioResponse(req, res, episode);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ─── RAG Q&A Routes (Phase 5) ─────────────────────────────────────────────────
 
 // POST /api/episodes/:id/ask - Grounded Q&A against episode transcript & sources (Rate-Limited Public)
@@ -511,7 +528,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Backend server running on http://localhost:${PORT} (${isProduction ? 'production' : 'development'} mode)`);
   if (!process.env.OPERATOR_API_KEY) {
     console.warn('[Security Notice] OPERATOR_API_KEY is not defined in environment. Protected mutation endpoints will fail closed with 401.');

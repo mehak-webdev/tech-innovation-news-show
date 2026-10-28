@@ -110,3 +110,4 @@ export function calculateUTCCronForIST(istHour = 18, istMinute = 0) {
     utcCronString: `${utcMinute} ${utcHour} * * *`
   };
 }
+

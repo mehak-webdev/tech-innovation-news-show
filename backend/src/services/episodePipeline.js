@@ -1,6 +1,7 @@
 import pool from '../db/index.js';
 import { generateEpisodeScript } from './episodeScriptGenerator.js';
 import { generateTTSAudio, verifyAudioFile } from './ttsGenerator.js';
+import { uploadAudio } from './audioStorage.js';
 import { indexEpisode } from './ragIndexer.js';
 import { fetchAndSelectArticles } from './smartArticleSelector.js';
 import { getISTDateString, getISTFormattedDate } from '../utils/timezone.js';
@@ -216,23 +217,47 @@ export async function generateEpisode(options = {}) {
       await pool.query("UPDATE episodes SET stage = 'generating_audio' WHERE id = $1", [episode.id]);
 
       const ttsResult = await generateTTSAudio(scriptText, targetDate);
+
+      // Upload to durable storage (S3/Cloudflare R2 with local fallback)
+      console.log(`[EpisodePipeline] Uploading audio to durable storage for episode ${episode.id}...`);
+      const uploadResult = await uploadAudio({
+        episodeId: episode.id,
+        episodeDate: targetDate,
+        buffer: ttsResult.buffer,
+        filename: ttsResult.filename
+      });
+
       audioFilename = ttsResult.filename;
-      audioUrl = ttsResult.audioUrl;
-      durationSeconds = ttsResult.durationSeconds;
+      audioUrl = `/api/episodes/${episode.id}/audio`;
+      durationSeconds = uploadResult.durationSeconds || ttsResult.durationSeconds;
 
       await pool.query(`
         UPDATE episodes
         SET audio_filename = $1,
             audio_url = $2,
             duration_seconds = $3,
+            audio_storage_key = $4,
+            audio_storage_provider = $5,
+            audio_bytes = $6,
             stage = 'indexing_rag'
-        WHERE id = $4
-      `, [audioFilename, audioUrl, durationSeconds, episode.id]);
+        WHERE id = $7
+      `, [
+        audioFilename,
+        audioUrl,
+        durationSeconds,
+        uploadResult.key,
+        uploadResult.provider,
+        uploadResult.bytes,
+        episode.id
+      ]);
 
       pipelineDiagnostics.stages.audioGeneration = {
         reused: false,
         durationMs: Date.now() - audioStart,
         filename: audioFilename,
+        storageProvider: uploadResult.provider,
+        storageKey: uploadResult.key,
+        audioBytes: uploadResult.bytes,
         durationSeconds
       };
     }
@@ -306,11 +331,15 @@ export async function getAllEpisodes() {
     SELECT
       e.id, e.episode_date, e.title, e.status, e.stage,
       e.audio_url, e.duration_seconds, e.generated_at, e.reviewed,
+      e.audio_storage_provider, e.audio_bytes,
       e.error_message, e.retry_count, e.diagnostics
     FROM episodes e
     ORDER BY e.episode_date DESC;
   `);
-  return result.rows;
+  return result.rows.map(row => ({
+    ...row,
+    audio_url: `/api/episodes/${row.id}/audio`
+  }));
 }
 
 /**
@@ -327,6 +356,7 @@ export async function getEpisodeById(id) {
   }
 
   const episode = episodeResult.rows[0];
+  episode.audio_url = `/api/episodes/${episode.id}/audio`;
 
   const articlesResult = await pool.query(`
     SELECT

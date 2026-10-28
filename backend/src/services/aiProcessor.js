@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import { getPromptCategoryOptions, mapToCanonicalCategory } from './categoryMapper.js';
 
 dotenv.config();
 
@@ -50,7 +51,7 @@ Evaluation Rubric for Importance Score (1-100 points):
 Respond strictly with a valid JSON object matching this schema:
 {
   "summary": "2-3 clear, executive sentences summarizing the news and its significance",
-  "category": "One of: Artificial Intelligence | Cloud & Infrastructure | Cybersecurity | Software Engineering | Hardware & Devices | Startups & Venture",
+  "category": "Must be exactly one of: ${getPromptCategoryOptions()}",
   "key_points": [
     "First concise key takeaway or statistic",
     "Second concise key takeaway or implication",
@@ -95,10 +96,13 @@ Respond strictly with a valid JSON object matching this schema:
       }
 
       const parsed = JSON.parse(responseText);
+      const canonicalCat = await mapToCanonicalCategory(parsed.category || 'General Innovation');
 
       return {
         summary: (parsed.summary || cleanSummary || '').trim(),
-        category: (parsed.category || 'General Technology').trim(),
+        category: canonicalCat.name,
+        category_id: canonicalCat.id,
+        category_slug: canonicalCat.slug,
         key_points: Array.isArray(parsed.key_points) ? parsed.key_points : [parsed.key_points].filter(Boolean),
         importance_score: Math.min(100, Math.max(1, parseInt(parsed.importance_score, 10) || 50)),
         importance_reason: (parsed.importance_reason || 'Standard technology news event').trim()

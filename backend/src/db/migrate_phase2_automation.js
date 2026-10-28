@@ -82,3 +82,4 @@ if (process.argv[1]?.endsWith('migrate_phase2_automation.js')) {
       process.exit(1);
     });
 }
+

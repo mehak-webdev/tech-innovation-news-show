@@ -131,3 +131,4 @@ describe('Smart Article Selection & Deduplication', () => {
     assert.strictEqual(result.diagnostics.deprioritizedRecentlyUsed, 2);
   });
 });
+

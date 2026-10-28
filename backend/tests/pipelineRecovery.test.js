@@ -108,3 +108,4 @@ describe('Pipeline Resumability & Verification Safeguards', () => {
     assert.ok(updatedState.error_message.includes('TTS generation failed'));
   });
 });
+

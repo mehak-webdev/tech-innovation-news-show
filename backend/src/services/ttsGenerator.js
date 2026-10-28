@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { parseWavMetadata } from './audioStorage.js';
 
 dotenv.config();
 
@@ -127,10 +128,18 @@ export async function generateTTSAudio(script, episodeDate) {
 
         console.log(`[TTSGenerator] Audio saved: ${filePath} (${Math.round(wavBuffer.length / 1024)} KB)`);
 
-        // Estimate duration: standard 24kHz mono PCM WAV is ~48000 bytes/sec
-        const durationSeconds = Math.max(1, Math.round(audioBuffer.length / 48000));
+        // Deterministically parse exact duration from WAV header
+        const metadata = parseWavMetadata(wavBuffer);
+        const durationSeconds = metadata.durationSeconds;
 
-        return { filename, audioUrl, filePath, durationSeconds };
+        return {
+          filename,
+          audioUrl,
+          filePath,
+          durationSeconds,
+          audioBytes: wavBuffer.length,
+          buffer: wavBuffer
+        };
       } catch (err) {
         console.warn(`[TTSGenerator] Model ${modelName} attempt ${attempt} failed: ${err.message?.slice(0, 100)}`);
         lastError = err;

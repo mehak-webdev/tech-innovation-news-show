@@ -1,5 +1,6 @@
 import pool from '../db/index.js';
 import { analyzeArticle } from './aiProcessor.js';
+import { mapToCanonicalCategory } from './categoryMapper.js';
 
 /**
  * Processes a limited batch of pending or failed articles using the AI pipeline.
@@ -55,23 +56,29 @@ export async function processPendingArticles({ limit = 3 } = {}) {
         summary: article.summary
       });
 
+      const canonicalCat = analysis.category_id
+        ? { id: analysis.category_id, name: analysis.category }
+        : await mapToCanonicalCategory(analysis.category);
+
       const updateQuery = `
         UPDATE articles
         SET 
           ai_summary = $1,
           ai_category = $2,
-          ai_key_points = $3::jsonb,
-          importance_score = $4,
-          importance_reason = $5,
+          category_id = $3,
+          ai_key_points = $4::jsonb,
+          importance_score = $5,
+          importance_reason = $6,
           processing_status = 'completed',
           processing_error = NULL,
           processed_at = CURRENT_TIMESTAMP
-        WHERE id = $6;
+        WHERE id = $7;
       `;
 
       await pool.query(updateQuery, [
         analysis.summary,
-        analysis.category,
+        canonicalCat.name,
+        canonicalCat.id,
         JSON.stringify(analysis.key_points),
         analysis.importance_score,
         analysis.importance_reason,
@@ -131,24 +138,30 @@ export async function retrySingleArticle(articleId) {
       summary: article.summary
     });
 
+    const canonicalCat = analysis.category_id
+      ? { id: analysis.category_id, name: analysis.category }
+      : await mapToCanonicalCategory(analysis.category);
+
     const updateQuery = `
       UPDATE articles
       SET 
         ai_summary = $1,
         ai_category = $2,
-        ai_key_points = $3::jsonb,
-        importance_score = $4,
-        importance_reason = $5,
+        category_id = $3,
+        ai_key_points = $4::jsonb,
+        importance_score = $5,
+        importance_reason = $6,
         processing_status = 'completed',
         processing_error = NULL,
         processed_at = CURRENT_TIMESTAMP
-      WHERE id = $6
+      WHERE id = $7
       RETURNING *;
     `;
 
     const updatedResult = await pool.query(updateQuery, [
       analysis.summary,
-      analysis.category,
+      canonicalCat.name,
+      canonicalCat.id,
       JSON.stringify(analysis.key_points),
       analysis.importance_score,
       analysis.importance_reason,
