@@ -103,3 +103,4 @@ export function getPromptCategoryOptions() {
     .map(c => `"${c.name}"`)
     .join(', ');
 }
+

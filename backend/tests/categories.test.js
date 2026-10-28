@@ -87,3 +87,4 @@ describe('Phase 3: Canonical Categories & Deterministic Mapping', () => {
     assert.ok(!promptOpts.includes('"Uncategorized"'));
   });
 });
+

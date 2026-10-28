@@ -4,3 +4,4 @@
   "ignore": ["public/*", "tests/*", "node_modules/*"],
   "delay": 500
 }
+
