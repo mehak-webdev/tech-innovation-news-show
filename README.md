@@ -359,7 +359,57 @@ After deploying to production, verify these 6 user journeys:
 
 ---
 
-## Phase 3 Architecture: Persistent Storage, Canonical Categories & Grounded RAG
+## Testing & Verification Suite
+
+The backend includes a comprehensive automated test suite built with Node.js's native test runner (`node --test`). All 49 test cases run in ~2.8 seconds without requiring external paid API calls:
+
+```bash
+# Run all 49 backend test cases across 8 test suites
+npm --prefix backend test
+
+# Run frontend production build check
+npm --prefix frontend run build
+```
+
+### Verified Test Suites:
+1. **API Daily Automation & Security Enforcement (`tests/apiAutomation.test.js`)**: 4 tests verifying operator key enforcement (401), invalid key rejection, idempotent episode generation, and open public read endpoints.
+2. **API Contract & Route Integration (`tests/apiContract.test.js`)**: 8 tests verifying HTTP contracts for `/health`, `/api/sources`, `/api/articles` (input validation), `/api/episodes`, `/api/episodes/:id` (404/400 handling), `/api/episodes/:id/audio` (HTTP 206 Partial Content Range streaming), and `/api/analytics`.
+3. **Persistent Audio Storage & WAV Parsing (`tests/audioStorage.test.js`)**: 6 tests verifying exact duration parsing from binary RIFF headers at 24kHz mono and 44.1kHz stereo, invalid buffer rejection, and credential-safe diagnostics.
+4. **Canonical Categories & Deterministic Mapping (`tests/categories.test.js`)**: 9 tests verifying exact category matching, AI alias mapping (AI, Cloud, Hardware, Cybersecurity, Startups), regex fallbacks, and empty-string handling to `Uncategorized`.
+5. **Pipeline Resumability & Recovery (`tests/pipelineRecovery.test.js`)**: 4 tests verifying WAV file verification, script generation prompts without bullet points, script reuse, and TTS failure isolation.
+6. **Grounded RAG, Chunking & Cosine Metrics (`tests/ragGrounded.test.js`)**: 5 tests verifying sentence boundary chunking with overlap, empty text handling, cosine similarity math ($1 - \text{distance}$), and 768-dimension vector validation.
+7. **Smart Article Selection & Deduplication (`tests/smartArticleSelector.test.js`)**: 8 tests verifying canonical URL normalization, title normalization, recency scoring, malformed story exclusion, consecutive episode deprioritization, and category diversity.
+8. **Timezone Utilities (`tests/timezone.test.js`)**: 5 tests verifying `Asia/Kolkata` date boundaries, midnight transitions, and UTC cron calculations.
+
+---
+
+## Database Migration Sequence
+
+For fresh or existing installations, run migrations in this order:
+
+```bash
+# 1. Base tables: sources, categories, articles
+npm --prefix backend run migrate
+
+# 2. AI processing fields on articles
+npm --prefix backend run migrate:phase3
+
+# 3. Episodes and episode_articles junction table
+npm --prefix backend run migrate:phase4
+
+# 4. Episode chunks with vector(768) and pgvector extension
+npm --prefix backend run migrate:phase5
+
+# 5. Automation, resumability & IST stages on episodes
+npm --prefix backend run migrate:phase2_automation
+
+# 6. Persistent audio storage metadata & canonical categories backfill
+node backend/src/db/migrate_phase3_storage_categories.js
+```
+
+---
+
+## Phase 3 & 4 Architecture: Persistent Storage, Categories, RAG & Audit
 
 ### 1. Persistent Audio Object Storage (S3 / Cloudflare R2 / Local Fallback)
 - **Dual-Mode Operation:** Audio generation uses `@aws-sdk/client-s3`. If `S3_BUCKET_NAME`, `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY` are provided, generated WAV files are uploaded directly to S3 or Cloudflare R2 with verification. If unconfigured, the system automatically falls back to local disk storage (`backend/public/audio/`).

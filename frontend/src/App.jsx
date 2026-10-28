@@ -19,6 +19,7 @@ export default function App() {
   const [selectedEpisode, setSelectedEpisode] = useState(null);
   const [isGeneratingEpisode, setIsGeneratingEpisode] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
+  const [audioError, setAudioError] = useState(null);
   const audioRef = useRef(null);
 
   // RAG Q&A state (Phase 5)
@@ -151,6 +152,7 @@ export default function App() {
         const data = await response.json();
         setSelectedEpisode(data.episode);
         setShowTranscript(false);
+        setAudioError(null);
         setAskQuestion('');
         setAskAnswer(null);
         setAskError(null);
@@ -415,7 +417,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-lg font-semibold tracking-tight text-white">Tech Innovation News Show</h1>
-              <p className="text-xs text-slate-400">Phase 4 • Episode Generation & Audio Player</p>
+              <p className="text-xs text-slate-400">Automated Daily Tech Broadcast & RAG Knowledge Engine</p>
             </div>
           </div>
           <div className="flex items-center flex-wrap gap-2 text-xs">
@@ -763,16 +765,28 @@ export default function App() {
 
                 {/* Audio Player */}
                 {selectedEpisode.status === 'audio_ready' && selectedEpisode.audio_url && (
-                  <div className="bg-slate-950 rounded-xl p-4 border border-slate-800">
-                    <p className="text-xs text-slate-400 mb-2 font-medium">🎵 Episode Audio</p>
+                  <div className="bg-slate-950 rounded-xl p-4 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-slate-400 font-medium">🎵 Episode Audio</p>
+                      {selectedEpisode.duration_seconds && (
+                        <span className="text-[11px] text-slate-500 font-mono">
+                          Duration: {Math.floor(selectedEpisode.duration_seconds / 60)}:{(selectedEpisode.duration_seconds % 60).toString().padStart(2, '0')}
+                        </span>
+                      )}
+                    </div>
                     <audio
                       ref={audioRef}
                       controls
                       className="w-full"
-                      src={`${apiUrl}${selectedEpisode.audio_url}`}
+                      src={selectedEpisode.audio_url.startsWith('http') ? selectedEpisode.audio_url : `${apiUrl}${selectedEpisode.audio_url}`}
+                      onError={() => setAudioError('Audio playback failed. Please check network connection or verify audio storage.')}
+                      onPlay={() => setAudioError(null)}
                     >
                       Your browser does not support the audio element.
                     </audio>
+                    {audioError && (
+                      <p className="text-[11px] text-rose-400 pt-1">⚠️ {audioError}</p>
+                    )}
                   </div>
                 )}
 
@@ -1259,7 +1273,7 @@ export default function App() {
 
       {/* ── Footer ── */}
       <footer className="border-t border-slate-800/80 py-6 text-center space-y-1">
-        <p className="text-xs text-slate-500">Tech Innovation News Show · Phase 6: Analytics Dashboard & Production Architecture</p>
+        <p className="text-xs text-slate-500">Tech Innovation News Show · Production Ready Full-Stack Platform</p>
         <p className="text-[11px] text-slate-600">🤖 AI-generated content. Not editorially reviewed. Verify facts with original sources.</p>
       </footer>
     </div>

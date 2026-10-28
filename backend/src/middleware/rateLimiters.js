@@ -45,22 +45,22 @@ export const retryLimiter = createLimiter({
 });
 
 /**
- * Episode generation limiter: max 5 requests per hour per IP.
+ * Episode generation limiter: max 5 requests per hour in production (100 in dev/test).
  * Episode generation invokes Gemini scriptwriting + Gemini TTS audio synthesis.
  */
 export const episodeGenerateLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
-  max: 5,
-  message: 'Episode generation rate limit exceeded (maximum 5 requests per hour). Please try again later.'
+  max: process.env.NODE_ENV === 'production' ? 5 : 100,
+  message: 'Episode generation rate limit exceeded (maximum 5 requests per hour in production). Please try again later.'
 });
 
 /**
- * Scheduled daily workflow job limiter: max 10 requests per hour per IP.
+ * Scheduled daily workflow job limiter: max 10 requests per hour in production (100 in dev/test).
  */
 export const dailyJobLimiter = createLimiter({
   windowMs: 60 * 60 * 1000,
-  max: 10,
-  message: 'Daily workflow job rate limit exceeded (maximum 10 executions per hour). Please try again later.'
+  max: process.env.NODE_ENV === 'production' ? 10 : 100,
+  message: 'Daily workflow job rate limit exceeded. Please try again later.'
 });
 
 /**

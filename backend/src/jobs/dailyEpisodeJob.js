@@ -75,14 +75,14 @@ export async function runDailyEpisodeWorkflow(options = {}) {
       console.log(`[DailyEpisodeJob] Step 2: Analyzing up to ${maxToProcess} pending articles with Gemini...`);
       const processStart = Date.now();
       try {
-        const processResult = await processPendingArticles(maxToProcess);
+        const processResult = await processPendingArticles({ limit: maxToProcess });
         report.steps.aiProcessing = {
           success: true,
           durationMs: Date.now() - processStart,
-          processedCount: processResult.processedCount || 0,
-          failedCount: processResult.failedCount || 0
+          processedCount: processResult.succeeded || 0,
+          failedCount: processResult.failed || 0
         };
-        console.log(`[DailyEpisodeJob] AI analysis batch complete: ${processResult.processedCount || 0} processed, ${processResult.failedCount || 0} failed.`);
+        console.log(`[DailyEpisodeJob] AI analysis batch complete: ${processResult.succeeded || 0} processed, ${processResult.failed || 0} failed.`);
       } catch (processErr) {
         console.warn(`[DailyEpisodeJob] Non-fatal AI processing warning: ${processErr.message}`);
         report.steps.aiProcessing = {
