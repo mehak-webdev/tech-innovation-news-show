@@ -10,7 +10,9 @@
     "migrate": "npm --prefix backend run migrate",
     "migrate:phase3": "npm --prefix backend run migrate:phase3",
     "migrate:phase4": "npm --prefix backend run migrate:phase4",
-    "migrate:phase5": "npm --prefix backend run migrate:phase5"
+    "migrate:phase5": "npm --prefix backend run migrate:phase5",
+    "migrate:phase2_automation": "npm --prefix backend run migrate:phase2_automation",
+    "test": "npm --prefix backend test"
   },
   "keywords": [
     "react",

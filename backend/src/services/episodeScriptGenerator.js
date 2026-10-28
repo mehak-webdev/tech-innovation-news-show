@@ -1,11 +1,9 @@
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
-import pool from '../db/index.js';
+import { fetchAndSelectArticles } from './smartArticleSelector.js';
+import { getISTDateString, getISTFormattedDate } from '../utils/timezone.js';
 
 dotenv.config();
-
-const MIN_ARTICLES = 2;
-const MAX_ARTICLES = 3;
 
 function getGenAIClient() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -23,66 +21,30 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+async function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 /**
- * Fetches top AI-processed articles from PostgreSQL and generates
- * a broadcast-ready news episode script using Google Gemini.
- *
- * Returns: { script, articleIds, articleData, episodeDate, title }
+ * Builds the broadcast script prompt from selected articles.
  */
-export async function generateEpisodeScript() {
-  // 1. Fetch top eligible articles by importance score
-  const articlesResult = await pool.query(`
-    SELECT
-      a.id,
-      a.title,
-      a.url,
-      a.author,
-      a.ai_summary,
-      a.ai_key_points,
-      a.ai_category,
-      a.importance_score,
-      s.name AS source_name,
-      s.website_url AS source_website
-    FROM articles a
-    LEFT JOIN sources s ON a.source_id = s.id
-    WHERE a.processing_status = 'completed'
-      AND a.ai_summary IS NOT NULL
-      AND a.importance_score IS NOT NULL
-    ORDER BY a.importance_score DESC, a.published_at DESC
-    LIMIT $1;
-  `, [MAX_ARTICLES]);
-
-  const articles = articlesResult.rows;
-
-  if (articles.length < MIN_ARTICLES) {
-    throw new Error(
-      `Insufficient AI-processed articles: found ${articles.length}, need at least ${MIN_ARTICLES}. ` +
-      `Please process more articles with the AI pipeline first.`
-    );
-  }
-
-  const episodeDate = new Date().toISOString().split('T')[0];
-  const formattedDate = new Date().toLocaleDateString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-  });
-  const episodeTitle = `Tech Innovation News Show — ${formattedDate}`;
-
-  // 2. Build the prompt from the top articles
+export function buildScriptPrompt(articles, formattedDate) {
   const storySections = articles.map((article, i) => {
     const keyPoints = Array.isArray(article.ai_key_points) ? article.ai_key_points : [];
     return `
 STORY ${i + 1} (Importance Score: ${article.importance_score}/100)
+Headline: ${article.title}
 Category: ${article.ai_category || 'Technology'}
 Source: ${article.source_name} (${article.url})
-Summary: ${article.ai_summary}
+Summary: ${article.ai_summary || article.summary}
 Key Points: ${keyPoints.map(p => `- ${p}`).join('\n')}
 `.trim();
   }).join('\n\n---\n\n');
 
-  const prompt = `You are a professional broadcast journalist host of the daily "Tech Innovation News Show".
+  return `You are a professional broadcast journalist host of the daily "Tech Innovation News Show".
 
 Write a polished, engaging, spoken-word radio broadcast script covering today's top ${articles.length} tech stories.
-The script should be concise, energetic, and approximately 1.5 minutes when read aloud (roughly 200 to 250 words total).
+The script should be concise, energetic, and approximately 1.5 to 2 minutes when read aloud (roughly 220 to 280 words total).
 
 REQUIRED STRUCTURE:
 1. GREETING & INTRO: Warm greeting mentioning today's date (${formattedDate}) and a quick one-sentence hook for what's ahead.
@@ -92,14 +54,41 @@ REQUIRED STRUCTURE:
 IMPORTANT RULES:
 - Write in natural spoken English — absolutely no bullet points, headers, or markdown symbols.
 - Keep the tone professional, informative, and lively.
-- Total word count MUST be under 260 words for clear, clean audio pacing.
+- Total word count MUST be between 200 and 300 words for clean, rhythmic pacing.
 
 STORIES TO COVER:
 ${storySections}
 
 Now write the full spoken broadcast script as continuous flowing text:`;
+}
 
-  // 3. Call Gemini to generate the script
+/**
+ * Generates an episode script from selected articles using Google Gemini.
+ *
+ * @param {Array<Object>} [providedArticles] - Pre-selected articles (optional)
+ * @param {Object} [options]
+ * @param {string} [options.targetDate] - Business date in YYYY-MM-DD (defaults to current IST date)
+ * @returns {Promise<{ script: string, title: string, episodeDate: string, articleIds: Array<number>, articleData: Array<Object> }>}
+ */
+export async function generateEpisodeScript(providedArticles = null, options = {}) {
+  const now = new Date();
+  const episodeDate = options.targetDate || getISTDateString(now);
+  const formattedDate = getISTFormattedDate(now);
+  const episodeTitle = `Tech Innovation News Show — ${formattedDate}`;
+
+  // 1. Obtain articles: use provided articles or run smart selector
+  let articles = providedArticles;
+  if (!articles || !Array.isArray(articles) || articles.length === 0) {
+    const selection = await fetchAndSelectArticles();
+    if (!selection.eligible || selection.selectedArticles.length === 0) {
+      throw new Error(selection.reason || 'Insufficient eligible articles found for episode script generation.');
+    }
+    articles = selection.selectedArticles;
+  }
+
+  const prompt = buildScriptPrompt(articles, formattedDate);
+
+  // 2. Call Gemini with resilient failover & bounded retries
   const ai = getGenAIClient();
   const candidateModels = [
     'gemini-3.5-flash',
@@ -107,37 +96,54 @@ Now write the full spoken broadcast script as continuous flowing text:`;
     'gemini-3.5-flash-lite',
     'gemini-flash-lite-latest'
   ];
+
   let lastError = null;
+  const maxModelRetries = 2;
 
   for (const modelName of candidateModels) {
-    try {
-      const response = await withTimeout(
-        ai.models.generateContent({
-          model: modelName,
-          contents: prompt
-        }),
-        20000
-      );
+    for (let attempt = 1; attempt <= maxModelRetries; attempt++) {
+      try {
+        console.log(`[ScriptGenerator] Requesting script from ${modelName} (attempt ${attempt}/${maxModelRetries})...`);
 
-      const script = (response.text || '').trim();
+        const response = await withTimeout(
+          ai.models.generateContent({
+            model: modelName,
+            contents: prompt
+          }),
+          25000
+        );
 
-      if (script.length < 200) {
-        throw new Error('Generated script is too short — likely a model formatting issue');
+        const script = (response.text || '').trim();
+
+        if (script.length < 180) {
+          throw new Error(`Generated script is too short (${script.length} characters)`);
+        }
+
+        return {
+          script,
+          title: episodeTitle,
+          episodeDate,
+          articleIds: articles.map(a => a.id),
+          articleData: articles
+        };
+      } catch (err) {
+        lastError = err;
+        const isRateLimit = err.message?.includes('429') || err.message?.includes('ResourceExhausted');
+        const isUnavailable = err.message?.includes('503') || err.message?.includes('UNAVAILABLE');
+
+        console.warn(`[ScriptGenerator] Model ${modelName} failed (attempt ${attempt}): ${err.message?.slice(0, 100)}`);
+
+        // If transient error and have more attempts on this model, back off with jitter
+        if ((isRateLimit || isUnavailable) && attempt < maxModelRetries) {
+          const delay = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+          await sleep(delay);
+        } else {
+          // Break to next candidate model
+          break;
+        }
       }
-
-      return {
-        script,
-        title: episodeTitle,
-        episodeDate,
-        articleIds: articles.map(a => a.id),
-        articleData: articles
-      };
-    } catch (err) {
-      console.warn(`Script generation failed with model ${modelName}: ${err.message?.slice(0, 80)}`);
-      lastError = err;
     }
   }
 
-  throw lastError || new Error('All Gemini models failed during script generation');
+  throw lastError || new Error('All Gemini candidate models failed during script generation');
 }
-

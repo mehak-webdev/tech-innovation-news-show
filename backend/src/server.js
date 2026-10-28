@@ -17,10 +17,12 @@ import {
   processLimiter,
   retryLimiter,
   episodeGenerateLimiter,
+  dailyJobLimiter,
   reindexLimiter,
   askLimiter,
   generalApiLimiter
 } from './middleware/rateLimiters.js';
+import { runDailyEpisodeWorkflow } from './jobs/dailyEpisodeJob.js';
 import {
   validateIdParam,
   validateProcessLimit,
@@ -319,14 +321,60 @@ app.post(
     req.setTimeout(120000);
     res.setTimeout(120000);
     try {
-      const result = await generateEpisode();
+      const result = await generateEpisode(req.body || {});
+
+      if (result.outcome === 'already_exists') {
+        return res.status(200).json({
+          outcome: 'already_exists',
+          message: result.message || 'Episode for today already exists and is complete.',
+          episode: result.episode,
+          cached: true
+        });
+      }
+
+      if (result.outcome === 'in_progress') {
+        return res.status(409).json({
+          outcome: 'in_progress',
+          message: result.message || 'Episode generation is currently in progress for this date.',
+          episode: result.episode
+        });
+      }
+
+      if (result.outcome === 'skipped_insufficient_articles') {
+        return res.status(200).json({
+          outcome: 'skipped_insufficient_articles',
+          message: result.message || 'Insufficient eligible articles to generate a quality episode.',
+          episode: result.episode,
+          skipped: true
+        });
+      }
+
       const statusCode = result.error ? 500 : 200;
       res.status(statusCode).json({
-        message: result.cached ? 'Returned existing episode' : 'Episode generated successfully',
+        outcome: result.outcome,
+        message: result.error ? 'Episode generation encountered an error' : 'Episode generated successfully',
         episode: result.episode,
         articleData: result.articleData || undefined,
         error: result.error || undefined
       });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/episodes/daily-job - Trigger complete scheduled daily workflow (Operator Protected)
+app.post(
+  '/api/episodes/daily-job',
+  requireOperatorAuth,
+  dailyJobLimiter,
+  async (req, res, next) => {
+    req.setTimeout(180000); // 3 minutes max for complete workflow
+    res.setTimeout(180000);
+    try {
+      const report = await runDailyEpisodeWorkflow(req.body || {});
+      const statusCode = report.status === 'failed' ? 500 : (report.outcome === 'in_progress' ? 409 : 200);
+      res.status(statusCode).json(report);
     } catch (err) {
       next(err);
     }

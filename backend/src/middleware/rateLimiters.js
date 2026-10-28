@@ -55,6 +55,15 @@ export const episodeGenerateLimiter = createLimiter({
 });
 
 /**
+ * Scheduled daily workflow job limiter: max 10 requests per hour per IP.
+ */
+export const dailyJobLimiter = createLimiter({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  message: 'Daily workflow job rate limit exceeded (maximum 10 executions per hour). Please try again later.'
+});
+
+/**
  * Vector reindexing limiter: max 10 requests per hour per IP.
  */
 export const reindexLimiter = createLimiter({
@@ -82,3 +91,4 @@ export const generalApiLimiter = createLimiter({
   max: 120,
   message: 'Too many requests. Please slow down your browsing pace.'
 });
+

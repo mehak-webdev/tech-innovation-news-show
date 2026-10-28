@@ -11,6 +11,24 @@ const AUDIO_DIR = path.resolve(__dirname, '../../public/audio');
 const MAX_SCRIPT_CHARS = 8000;
 const MIN_SCRIPT_CHARS = 100;
 
+/**
+ * Checks whether an audio file exists on disk and is a valid non-empty WAV.
+ *
+ * @param {string} filename - e.g. "episode_2026-10-28.wav"
+ * @returns {boolean}
+ */
+export function verifyAudioFile(filename) {
+  if (!filename) return false;
+  const filePath = path.join(AUDIO_DIR, path.basename(filename));
+  if (!fs.existsSync(filePath)) return false;
+  try {
+    const stats = fs.statSync(filePath);
+    return stats.size >= 1000;
+  } catch {
+    return false;
+  }
+}
+
 function getGenAIClient() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -56,61 +74,72 @@ export async function generateTTSAudio(script, episodeDate) {
 
   const ai = getGenAIClient();
 
-  // Try Gemini TTS models in order
-  const ttsCandidates = ['gemini-3.8-flash-tts', 'gemini-2.5-flash-preview-tts'];
+  // Try Gemini TTS models in order with failover and retry
+  const ttsCandidates = [
+    'gemini-3.8-flash-tts',
+    'gemini-3.1-flash-tts-preview',
+    'gemini-2.5-flash-preview-tts'
+  ];
   let lastError = null;
 
   for (const modelName of ttsCandidates) {
-    try {
-      console.log(`Attempting TTS with model: ${modelName}`);
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        console.log(`[TTSGenerator] Attempting TTS with model: ${modelName} (attempt ${attempt}/2)`);
 
-      const response = await withTimeout(
-        ai.models.generateContent({
-          model: modelName,
-          contents: truncatedScript,
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: 'Kore'
+        const response = await withTimeout(
+          ai.models.generateContent({
+            model: modelName,
+            contents: truncatedScript,
+            config: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: 'Kore'
+                  }
                 }
               }
             }
-          }
-        }),
-        75000
-      );
+          }),
+          75000
+        );
 
-      // Extract audio data from the response
-      const audioData = response?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        // Extract audio data from the response
+        const audioData = response?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
 
-      if (!audioData) {
-        throw new Error('TTS model returned no audio data in response');
+        if (!audioData) {
+          throw new Error('TTS model returned no audio data in response');
+        }
+
+        // Decode base64 audio
+        const audioBuffer = Buffer.from(audioData, 'base64');
+
+        if (audioBuffer.length < 1000) {
+          throw new Error(`Audio buffer is too small (${audioBuffer.length} bytes) — likely an empty or error response`);
+        }
+
+        // Check if the model already returned a complete WAV file (starts with 'RIFF')
+        const isAlreadyWav = audioBuffer.slice(0, 4).toString('ascii') === 'RIFF';
+        const wavBuffer = isAlreadyWav ? audioBuffer : addWavHeader(audioBuffer, 24000, 1, 16);
+
+        fs.writeFileSync(filePath, wavBuffer);
+
+        console.log(`[TTSGenerator] Audio saved: ${filePath} (${Math.round(wavBuffer.length / 1024)} KB)`);
+
+        // Estimate duration: standard 24kHz mono PCM WAV is ~48000 bytes/sec
+        const durationSeconds = Math.max(1, Math.round(audioBuffer.length / 48000));
+
+        return { filename, audioUrl, filePath, durationSeconds };
+      } catch (err) {
+        console.warn(`[TTSGenerator] Model ${modelName} attempt ${attempt} failed: ${err.message?.slice(0, 100)}`);
+        lastError = err;
+        if (attempt < 2 && (err.message?.includes('429') || err.message?.includes('503'))) {
+          await new Promise(r => setTimeout(r, 2000 + Math.random() * 1000));
+        } else {
+          break;
+        }
       }
-
-      // Decode base64 audio
-      const audioBuffer = Buffer.from(audioData, 'base64');
-
-      if (audioBuffer.length < 1000) {
-        throw new Error(`Audio buffer is too small (${audioBuffer.length} bytes) — likely an empty or error response`);
-      }
-
-      // Check if the model already returned a complete WAV file (starts with 'RIFF')
-      const isAlreadyWav = audioBuffer.slice(0, 4).toString('ascii') === 'RIFF';
-      const wavBuffer = isAlreadyWav ? audioBuffer : addWavHeader(audioBuffer, 24000, 1, 16);
-
-      fs.writeFileSync(filePath, wavBuffer);
-
-      console.log(`Audio saved to: ${filePath} (${Math.round(wavBuffer.length / 1024)} KB, isAlreadyWav: ${isAlreadyWav})`);
-
-      // Estimate duration: standard 24kHz mono PCM WAV is ~48000 bytes/sec
-      const durationSeconds = Math.max(1, Math.round(audioBuffer.length / 48000));
-
-      return { filename, audioUrl, filePath, durationSeconds };
-    } catch (err) {
-      console.warn(`TTS model ${modelName} failed: ${err.message?.slice(0, 100)}`);
-      lastError = err;
     }
   }
 

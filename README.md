@@ -157,6 +157,7 @@ The platform enforces a clear separation between public consumer endpoints and p
 | `POST` | `/api/articles/process` | **Protected (Operator)** | 20 / 15 min | Runs AI editorial analysis on pending articles (`limit` 1–10) |
 | `POST` | `/api/articles/:id/retry` | **Protected (Operator)** | 30 / 15 min | Reprocesses an individual article |
 | `POST` | `/api/episodes/generate` | **Protected (Operator)** | 5 / hour | Generates today's script, audio, and vector indexes |
+| `POST` | `/api/episodes/daily-job` | **Protected (Operator)** | 10 / hour | Runs full daily pipeline (ingest, analyze, select, generate/resume) |
 | `POST` | `/api/episodes/:id/reindex` | **Protected (Operator)** | 10 / hour | Re-indexes vector embeddings for an episode |
 
 ---
@@ -234,6 +235,73 @@ curl -i -X POST "http://localhost:5000/api/episodes/invalid-id/ask" \
 # Expected: HTTP/1.1 400 Bad Request
 # Body: {"error": "Invalid episode ID. Must be a positive integer."}
 ```
+
+---
+
+## Daily Episode Automation & Resilient Pipeline (Phase 2)
+
+### 1. Smart Article Selection & Category Diversity
+The smart article selector ensures every daily episode contains a balanced, high-impact overview of the tech landscape:
+- **Eligibility Filter:** Only articles with `processing_status = 'completed'`, non-null `ai_summary`, and valid `importance_score` are considered.
+- **Composite Scoring:** Combines the AI editorial importance score (1–100) with a recency bonus:
+  - Published within 12 hours: +5 points
+  - Published within 24 hours: +3 points
+  - Published within 48 hours: 0 points
+  - Older than 48 hours: -5 points
+- **Canonical Deduplication:** Normalizes URLs (strips `utm_*`, `ref`, session tracking) and normalizes titles (strips HTML entities and symbols) to prevent duplicate stories from multiple publishers.
+- **Consecutive Episode Repetition Guard:** Automatically checks articles used in recent episodes and excludes them when sufficient fresh stories exist.
+- **Round-Robin Category Diversity:** Iterates through available categories (`Artificial Intelligence`, `Hardware & Devices`, `Cybersecurity`, `Cloud & Infrastructure`, `Software Engineering`, `Startups & Venture`) to guarantee no single category monopolizes the show.
+- **Configurable Thresholds:**
+  - `EPISODE_TARGET_ARTICLES` (default: 5)
+  - `EPISODE_MIN_ARTICLES` (default: 3)
+  - `EPISODE_LOOKBACK_HOURS` (default: 48)
+
+### 2. Asia/Kolkata (IST) Timezone Engine
+The platform is calibrated specifically for Indian listeners:
+- Business dates are computed in `Asia/Kolkata` (UTC+05:30) using native `Intl.DateTimeFormat`.
+- Avoids UTC date mismatch (e.g. 1:00 AM IST on October 29 is 19:30 UTC on October 28 — UTC-based split would incorrectly label it as October 28).
+- Boundary tests verify seamless date transitions across midnight IST.
+
+### 3. Concurrency Safety & Duplicate Prevention
+- **Database-Level Constraint:** `episodes.episode_date` enforces `UNIQUE NOT NULL`.
+- **Atomic Registration:** Initial registration uses `INSERT INTO episodes ... ON CONFLICT (episode_date) DO NOTHING`. If a concurrent request arrives simultaneously, the conflict is caught gracefully and returned without unhandled errors.
+- **Zero Record Deletion:** Incomplete or failed episodes are **never deleted**. The pipeline preserves intermediate progress and resumes from the last successful stage.
+- **Active Lock Detection:** If generation is already in progress (`status = 'generating'`), concurrent requests receive `409 Conflict` (or return the in-progress status). If a generation attempt is older than 10 minutes (stale process crash), it is automatically recovered.
+
+### 4. Resumable Stage Machine & Failure Recovery
+Episodes progress through explicit verifiable stages:
+1. `selecting_articles`: Selects eligible diverse stories; if insufficient articles are available, records a clean `skipped` state without failing or creating empty episodes.
+2. `generating_script`: Reuses an existing valid script if already present in the database (>= 180 chars) instead of wasting Gemini API quota.
+3. `generating_audio`: Reuses existing audio if a valid `.wav` file (>= 1 KB) is already verified on disk.
+4. `indexing_rag`: Generates 768-dimensional vector embeddings in PostgreSQL `pgvector`.
+5. `completed`: Marks `status = 'audio_ready'` and `completed_at = NOW()`.
+
+### 5. Scheduled Automation via Render Cron Job
+The automated daily workflow can be triggered externally via Render Cron Job, GitHub Actions, or local cron:
+- **Target Broadcast Time:** 6:00 PM IST (18:00 IST).
+- **UTC Schedule Conversion:** 18:00 IST = **12:30 UTC** (`18:00 - 05:30`).
+- **Render Cron Expression:** `30 12 * * *`
+- **Render Cron Command:**
+  ```bash
+  curl -X POST https://<your-backend>.onrender.com/api/episodes/daily-job \
+    -H "Content-Type: application/json" \
+    -H "X-Operator-Key: $OPERATOR_API_KEY"
+  ```
+- **CLI Runner Alternative:**
+  ```bash
+  cd backend && node src/jobs/dailyEpisodeJob.js
+  ```
+
+### 6. Automated Testing Suite
+Run the test suite covering all Phase 1 and Phase 2 critical paths:
+```bash
+npm test
+```
+**Test Coverage (21 tests across 4 suites):**
+- `Timezone Utilities (Asia/Kolkata / IST)`: UTC boundary mappings, midnight transitions, UTC cron conversions.
+- `Smart Article Selection & Deduplication`: Canonical URLs, title normalization, recency bonus, category diversity, insufficient story skip.
+- `Pipeline Resumability & Verification Safeguards`: Audio file verification, script prompt structure, script reuse, audio reuse, TTS error containment.
+- `API Daily Automation & Security Enforcement`: Operator key 401 rejections, idempotent re-runs, public endpoint accessibility.
 
 ---
 

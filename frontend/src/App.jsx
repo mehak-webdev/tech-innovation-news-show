@@ -272,15 +272,25 @@ export default function App() {
         showNotification('error', `Rate Limit Exceeded (429): ${data.message}`);
         return;
       }
-      if (data.episode?.status === 'audio_ready') {
+      if (data.outcome === 'already_exists' || data.cached) {
+        showNotification('info', `Today's episode already exists: "${data.episode?.title || 'Daily Episode'}". Playback loaded.`);
+        await fetchEpisodes();
+        if (data.episode?.id) {
+          await fetchEpisodeDetail(data.episode.id);
+        }
+      } else if (data.outcome === 'in_progress' || response.status === 409) {
+        showNotification('info', data.message || 'Episode generation is currently in progress for today. Please wait a moment.');
+      } else if (data.outcome === 'skipped_insufficient_articles' || data.skipped) {
+        showNotification('warning', `Episode Generation Skipped: ${data.message || 'Insufficient eligible stories available.'}`);
+      } else if (data.episode?.status === 'audio_ready' || data.episode?.status === 'completed') {
         showNotification('success', `Episode generated! "${data.episode.title}" is ready to play.`);
         setSelectedEpisode(null);
         await fetchEpisodes();
         await fetchEpisodeDetail(data.episode.id);
       } else if (data.episode?.status === 'failed') {
-        showNotification('error', `Episode generation failed: ${data.episode.error_message}`);
+        showNotification('error', `Episode generation failed: ${data.episode.error_message || data.error}`);
       } else if (data.episode) {
-        showNotification('info', `Episode status: ${data.episode.status}. ${data.message}`);
+        showNotification('info', `Episode status: ${data.episode.status}. ${data.message || ''}`);
         await fetchEpisodes();
       }
     } catch (err) {
