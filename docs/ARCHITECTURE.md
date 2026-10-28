@@ -235,3 +235,4 @@ sequenceDiagram
 4. **Credential Confinement:**
    - Client bundle contains only `VITE_API_URL`.
    - The operator key entered by the user in Reader/Operator mode is stored only in browser `sessionStorage` and sent as a header; it is never baked into production build artifacts.
+

@@ -174,3 +174,4 @@ The pipeline uses multi-level resilience:
 5. **Strict Refusal (< 0.50 Similarity) vs Creative Fallback:**  
    *Trade-off:* Completely refusing to answer out-of-scope questions rather than attempting a generalized answer.  
    *Why chosen:* In journalism and news applications, factual accuracy is paramount. A confident refusal protects user trust and prevents AI hallucinations.
+

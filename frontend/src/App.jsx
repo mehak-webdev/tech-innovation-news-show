@@ -1,17 +1,22 @@
 import { useState, useEffect, useRef } from 'react';
+import { decodeHtmlEntities, formatRelativeTime } from './utils/textUtils.js';
 
 export default function App() {
   const [backendStatus, setBackendStatus] = useState('checking');
   const [backendData, setBackendData] = useState(null);
 
-  // Tab navigation
-  const [activeTab, setActiveTab] = useState('articles'); // 'articles' | 'episodes'
+  // Tab navigation: 'articles' | 'episodes' | 'analytics'
+  const [activeTab, setActiveTab] = useState('articles');
+
+  // Reader Mode state (improves article typography, line-height, and minimizes technical chrome)
+  const [readerMode, setReaderMode] = useState(false);
 
   // Articles state
   const [articles, setArticles] = useState([]);
   const [loadingArticles, setLoadingArticles] = useState(true);
   const [isIngesting, setIsIngesting] = useState(false);
   const [isProcessingAI, setIsProcessingAI] = useState(false);
+  const [expandedArticles, setExpandedArticles] = useState({});
 
   // Episodes state
   const [episodes, setEpisodes] = useState([]);
@@ -20,15 +25,22 @@ export default function App() {
   const [isGeneratingEpisode, setIsGeneratingEpisode] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
   const [audioError, setAudioError] = useState(null);
+  
+  // Custom audio player state
   const audioRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
 
-  // RAG Q&A state (Phase 5)
+  // RAG Q&A state
   const [askQuestion, setAskQuestion] = useState('');
   const [askLoading, setAskLoading] = useState(false);
   const [askAnswer, setAskAnswer] = useState(null);
   const [askError, setAskError] = useState(null);
 
-  // Analytics state (Phase 6)
+  // Analytics state
   const [analyticsData, setAnalyticsData] = useState(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
 
@@ -43,10 +55,10 @@ export default function App() {
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [keyInput, setKeyInput] = useState('');
 
-  // Shared
+  // Shared Filters & Notifications
   const [notification, setNotification] = useState(null);
-  const [activeFilter, setActiveFilter] = useState('all');
-  const [sortBy, setSortBy] = useState('latest');
+  const [activeFilter, setActiveFilter] = useState('all'); // 'all' | 'completed' | 'pending'
+  const [sortBy, setSortBy] = useState('latest'); // 'latest' | 'importance'
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -74,13 +86,13 @@ export default function App() {
     setKeyInput('');
     setShowKeyModal(false);
     if (trimmed) {
-      showNotification('success', 'Operator key saved for this browser session.');
+      showNotification('success', 'Operator key saved for this browser session. Privileged actions unlocked.');
     } else {
-      showNotification('info', 'Operator key cleared. Reverted to Reader Mode.');
+      showNotification('info', 'Operator key cleared. Reverted to standard Reader Mode.');
     }
   };
 
-  // ── Health check ────────────────────────────────────────────────────────────
+  // ── Health Check ────────────────────────────────────────────────────────────
   const checkBackend = async () => {
     try {
       const response = await fetch(`${apiUrl}/health`);
@@ -88,12 +100,12 @@ export default function App() {
       const data = await response.json();
       setBackendData(data);
       setBackendStatus('connected');
-    } catch (err) {
+    } catch {
       setBackendStatus('disconnected');
     }
   };
 
-  // ── Fetch articles ──────────────────────────────────────────────────────────
+  // ── Fetch Articles ──────────────────────────────────────────────────────────
   const fetchArticles = async () => {
     setLoadingArticles(true);
     try {
@@ -112,14 +124,18 @@ export default function App() {
     }
   };
 
-  // ── Fetch episodes ──────────────────────────────────────────────────────────
+  // ── Fetch Episodes ──────────────────────────────────────────────────────────
   const fetchEpisodes = async () => {
     setLoadingEpisodes(true);
     try {
       const response = await fetch(`${apiUrl}/api/episodes`);
       if (response.ok) {
         const data = await response.json();
-        setEpisodes(data.episodes || []);
+        const eps = data.episodes || [];
+        setEpisodes(eps);
+        if (!selectedEpisode && eps.length > 0) {
+          fetchEpisodeDetail(eps[0].id);
+        }
       }
     } catch (err) {
       console.error('Failed to fetch episodes:', err);
@@ -128,7 +144,7 @@ export default function App() {
     }
   };
 
-  // ── Fetch platform analytics (Phase 6) ──────────────────────────────────────
+  // ── Fetch Platform Analytics ────────────────────────────────────────────────
   const fetchAnalytics = async () => {
     setLoadingAnalytics(true);
     try {
@@ -144,7 +160,7 @@ export default function App() {
     }
   };
 
-  // ── Fetch full episode detail ────────────────────────────────────────────────
+  // ── Fetch Episode Detail ────────────────────────────────────────────────────
   const fetchEpisodeDetail = async (id) => {
     try {
       const response = await fetch(`${apiUrl}/api/episodes/${id}`);
@@ -153,6 +169,8 @@ export default function App() {
         setSelectedEpisode(data.episode);
         setShowTranscript(false);
         setAudioError(null);
+        setIsPlaying(false);
+        setCurrentTime(0);
         setAskQuestion('');
         setAskAnswer(null);
         setAskError(null);
@@ -166,7 +184,7 @@ export default function App() {
   const handleIngestNews = async () => {
     if (!operatorKey) {
       setShowKeyModal(true);
-      showNotification('info', 'Operator Authentication Required: Please enter your operator key to ingest news.');
+      showNotification('info', 'Operator Authentication Required: Enter your key to ingest fresh RSS headlines.');
       return;
     }
     setIsIngesting(true);
@@ -186,7 +204,7 @@ export default function App() {
         return;
       }
       if (data.stats) {
-        showNotification('success', `Ingestion Complete: Added ${data.stats.articlesInserted} new articles, skipped ${data.stats.duplicatesSkipped} duplicates.`);
+        showNotification('success', `Ingestion Complete: Added ${data.stats.articlesInserted} new stories, skipped ${data.stats.duplicatesSkipped} duplicates.`);
         await fetchArticles();
       } else {
         showNotification('info', data.message || 'Ingestion completed');
@@ -203,12 +221,12 @@ export default function App() {
   const handleProcessAI = async () => {
     if (!operatorKey) {
       setShowKeyModal(true);
-      showNotification('info', 'Operator Authentication Required: Please enter your operator key to run AI analysis.');
+      showNotification('info', 'Operator Authentication Required: Enter your key to run Gemini editorial analysis.');
       return;
     }
     setIsProcessingAI(true);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
     try {
       const response = await fetch(`${apiUrl}/api/articles/process?limit=3`, {
         method: 'POST',
@@ -227,7 +245,7 @@ export default function App() {
         return;
       }
       if (data.stats) {
-        showNotification('success', `AI Processing Complete: Analyzed ${data.stats.succeeded} articles (${data.stats.failed} failed).`);
+        showNotification('success', `AI Analysis Batch Complete: Successfully analyzed ${data.stats.succeeded} stories (${data.stats.failed} failed).`);
         await fetchArticles();
       } else if (data.message) {
         showNotification('info', data.message);
@@ -235,7 +253,7 @@ export default function App() {
       }
     } catch (err) {
       if (err.name === 'AbortError') {
-        showNotification('error', 'Processing is taking longer than expected. Refresh to see updated results.');
+        showNotification('info', 'AI analysis is processing in the background. Refresh in a few seconds to see updated scores.');
       } else {
         showNotification('error', `AI Processing failed: ${err.message}`);
       }
@@ -250,13 +268,12 @@ export default function App() {
   const handleGenerateEpisode = async () => {
     if (!operatorKey) {
       setShowKeyModal(true);
-      showNotification('info', 'Operator Authentication Required: Please enter your operator key to generate daily episodes.');
+      showNotification('info', 'Operator Authentication Required: Enter your key to generate a daily broadcast.');
       return;
     }
     setIsGeneratingEpisode(true);
-    setSelectedEpisode(null);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 90000);
+    const timeoutId = setTimeout(() => controller.abort(), 95000);
     try {
       const response = await fetch(`${apiUrl}/api/episodes/generate`, {
         method: 'POST',
@@ -277,27 +294,24 @@ export default function App() {
       if (data.outcome === 'already_exists' || data.cached) {
         showNotification('info', `Today's episode already exists: "${data.episode?.title || 'Daily Episode'}". Playback loaded.`);
         await fetchEpisodes();
-        if (data.episode?.id) {
-          await fetchEpisodeDetail(data.episode.id);
-        }
+        if (data.episode?.id) await fetchEpisodeDetail(data.episode.id);
       } else if (data.outcome === 'in_progress' || response.status === 409) {
-        showNotification('info', data.message || 'Episode generation is currently in progress for today. Please wait a moment.');
+        showNotification('info', data.message || 'Episode generation is currently in progress. Please wait a moment.');
       } else if (data.outcome === 'skipped_insufficient_articles' || data.skipped) {
-        showNotification('warning', `Episode Generation Skipped: ${data.message || 'Insufficient eligible stories available.'}`);
+        showNotification('warning', `Episode Generation Skipped: ${data.message || 'Fewer than 3 eligible stories available.'}`);
       } else if (data.episode?.status === 'audio_ready' || data.episode?.status === 'completed') {
-        showNotification('success', `Episode generated! "${data.episode.title}" is ready to play.`);
-        setSelectedEpisode(null);
+        showNotification('success', `Broadcast Generated! "${data.episode.title}" is ready to play.`);
         await fetchEpisodes();
         await fetchEpisodeDetail(data.episode.id);
       } else if (data.episode?.status === 'failed') {
-        showNotification('error', `Episode generation failed: ${data.episode.error_message || data.error}`);
+        showNotification('error', `Generation failed: ${data.episode.error_message || data.error}`);
       } else if (data.episode) {
         showNotification('info', `Episode status: ${data.episode.status}. ${data.message || ''}`);
         await fetchEpisodes();
       }
     } catch (err) {
       if (err.name === 'AbortError') {
-        showNotification('info', 'Generation is taking slightly longer in the background. Please wait a few seconds and refresh.');
+        showNotification('info', 'Episode generation is completing in the background. Refresh in a few seconds.');
       } else {
         showNotification('error', `Episode generation failed: ${err.message}`);
       }
@@ -324,10 +338,10 @@ export default function App() {
       });
       const data = await response.json();
       if (response.status === 429) {
-        throw new Error(data.message || 'Rate limit exceeded: Please wait before asking another question.');
+        throw new Error(data.message || 'Rate limit exceeded: Please wait 1 minute before asking another question.');
       }
       if (!response.ok) {
-        throw new Error(data.message || data.error || 'Failed to get answer');
+        throw new Error(data.message || data.error || 'Failed to retrieve answer');
       }
       setAskAnswer(data);
     } catch (err) {
@@ -337,11 +351,11 @@ export default function App() {
     }
   };
 
-  // ── Retry article (Protected Operator Route) ────────────────────────────────
+  // ── Retry Single Article (Protected Operator Route) ─────────────────────────
   const handleRetryArticle = async (id) => {
     if (!operatorKey) {
       setShowKeyModal(true);
-      showNotification('info', 'Operator Authentication Required: Please enter your operator key to reprocess articles.');
+      showNotification('info', 'Operator Authentication Required: Enter your key to retry article processing.');
       return;
     }
     try {
@@ -360,7 +374,7 @@ export default function App() {
         return;
       }
       if (response.ok) {
-        showNotification('success', `Article #${id} reprocessed successfully!`);
+        showNotification('success', `Story #${id} reprocessed successfully!`);
         await fetchArticles();
       } else {
         showNotification('error', data.message || data.error || 'Retry failed');
@@ -372,9 +386,53 @@ export default function App() {
 
   function showNotification(type, message) {
     setNotification({ type, message });
-    setTimeout(() => setNotification(null), 8000);
+    setTimeout(() => setNotification(null), 7000);
   }
 
+  // ── Audio Player Event Handlers ─────────────────────────────────────────────
+  const togglePlayPause = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioRef.current.play().then(() => setIsPlaying(true)).catch((e) => {
+        setAudioError(`Audio playback error: ${e.message}`);
+        setIsPlaying(false);
+      });
+    }
+  };
+
+  const handleSeek = (e) => {
+    const newTime = parseFloat(e.target.value);
+    setCurrentTime(newTime);
+    if (audioRef.current) {
+      audioRef.current.currentTime = newTime;
+    }
+  };
+
+  const changePlaybackSpeed = (speed) => {
+    setPlaybackSpeed(speed);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = speed;
+    }
+  };
+
+  const toggleMute = () => {
+    if (!audioRef.current) return;
+    const nextMuted = !isMuted;
+    audioRef.current.muted = nextMuted;
+    setIsMuted(nextMuted);
+  };
+
+  const formatAudioTime = (seconds) => {
+    if (isNaN(seconds) || seconds < 0) return '00:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // ── Initial Data Fetching ───────────────────────────────────────────────────
   useEffect(() => { checkBackend(); }, [apiUrl]);
   useEffect(() => { fetchArticles(); }, [apiUrl, activeFilter, sortBy]);
   useEffect(() => {
@@ -389,12 +447,37 @@ export default function App() {
     a => a.processing_status === 'pending' || a.processing_status === 'failed'
   ).length;
 
-  const statusColor = (score) => {
-    if (score >= 75) return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
-    if (score >= 50) return 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30';
-    return 'bg-slate-800 text-slate-400 border-slate-700';
+  // Category Theme Badges
+  const getCategoryBadgeStyle = (categoryName) => {
+    const raw = (categoryName || '').toLowerCase();
+    if (raw.includes('ai') || raw.includes('machine learning')) {
+      return 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30';
+    }
+    if (raw.includes('cloud') || raw.includes('software')) {
+      return 'bg-blue-500/10 text-blue-400 border-blue-500/30';
+    }
+    if (raw.includes('hardware') || raw.includes('device') || raw.includes('chip')) {
+      return 'bg-purple-500/10 text-purple-400 border-purple-500/30';
+    }
+    if (raw.includes('security') || raw.includes('cyber')) {
+      return 'bg-rose-500/10 text-rose-400 border-rose-500/30';
+    }
+    if (raw.includes('startup') || raw.includes('venture')) {
+      return 'bg-amber-500/10 text-amber-400 border-amber-500/30';
+    }
+    return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
   };
 
+  // Importance Score Color & Label
+  const getImportanceDisplay = (score) => {
+    const s = Number(score) || 0;
+    if (s >= 80) return { label: 'Breakthrough', badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' };
+    if (s >= 65) return { label: 'High Impact', badge: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40' };
+    if (s >= 50) return { label: 'Notable', badge: 'bg-blue-500/15 text-blue-300 border-blue-500/40' };
+    return { label: 'Routine', badge: 'bg-slate-800 text-slate-400 border-slate-700' };
+  };
+
+  // Episode Status Badge
   const episodeStatusBadge = (status) => {
     const map = {
       audio_ready: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
@@ -405,80 +488,127 @@ export default function App() {
     return map[status] || 'bg-slate-800 text-slate-400 border-slate-700';
   };
 
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
+  const resolvedAudioSrc = selectedEpisode?.audio_url
+    ? (selectedEpisode.audio_url.startsWith('http') ? selectedEpisode.audio_url : `${apiUrl}${selectedEpisode.audio_url}`)
+    : null;
 
-      {/* ── Header ── */}
-      <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-20 px-6 py-4">
+  return (
+    <div className={`min-h-screen bg-[#080D1B] text-[#F8FAFC] flex flex-col justify-between selection:bg-cyan-500 selection:text-slate-950 ${readerMode ? 'font-serif' : 'font-sans'}`}>
+
+      {/* ── Top Header ── */}
+      <header className="border-b border-[#263247] bg-[#10182A]/90 backdrop-blur-md sticky top-0 z-30 px-4 sm:px-6 py-3.5 transition-colors">
         <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-4">
+          
+          {/* Logo & Branding */}
           <div className="flex items-center space-x-3">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center font-bold text-white shadow-lg shadow-cyan-500/20">
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-cyan-400 via-blue-500 to-indigo-600 flex items-center justify-center font-extrabold text-white shadow-lg shadow-cyan-500/20 text-sm tracking-tight border border-cyan-400/30">
               TN
             </div>
             <div>
-              <h1 className="text-lg font-semibold tracking-tight text-white">Tech Innovation News Show</h1>
-              <p className="text-xs text-slate-400">Automated Daily Tech Broadcast & RAG Knowledge Engine</p>
+              <div className="flex items-center space-x-2">
+                <h1 className="text-base sm:text-lg font-bold tracking-tight text-[#F8FAFC]">Tech Innovation News Show</h1>
+                <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-500/30">
+                  AI Broadcast
+                </span>
+              </div>
+              <p className="text-xs text-[#94A3B8]">Your daily briefing on what's next in tech.</p>
             </div>
           </div>
+
+          {/* Service Indicators & Modes */}
           <div className="flex items-center flex-wrap gap-2 text-xs">
-            <div className="inline-flex items-center px-2.5 py-1 rounded-full bg-slate-800/80 border border-slate-700">
-              <span className="text-slate-400 mr-1.5">API:</span>
+            
+            {/* API Status */}
+            <div className="inline-flex items-center px-2.5 py-1 rounded-full bg-[#151F32] border border-[#263247]" title="Backend API Health">
+              <span className="text-[#94A3B8] mr-1.5 font-medium">API:</span>
               {backendStatus === 'connected' ? (
-                <span className="text-emerald-400 font-medium flex items-center"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1"></span>Connected</span>
+                <span className="text-emerald-400 font-semibold flex items-center">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse"></span>Online
+                </span>
               ) : (
-                <span className="text-rose-400 font-medium">Offline</span>
+                <span className="text-rose-400 font-semibold flex items-center">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400 mr-1"></span>Offline
+                </span>
               )}
             </div>
-            <div className="inline-flex items-center px-2.5 py-1 rounded-full bg-slate-800/80 border border-slate-700">
-              <span className="text-slate-400 mr-1.5">DB:</span>
+
+            {/* DB Status */}
+            <div className="inline-flex items-center px-2.5 py-1 rounded-full bg-[#151F32] border border-[#263247]" title="Neon PostgreSQL Database">
+              <span className="text-[#94A3B8] mr-1.5 font-medium">DB:</span>
               {isDbConnected ? (
-                <span className="text-emerald-400 font-medium flex items-center"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1"></span>PostgreSQL</span>
+                <span className="text-emerald-400 font-semibold flex items-center">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1"></span>Connected
+                </span>
               ) : (
-                <span className="text-amber-400 font-medium">Disconnected</span>
+                <span className="text-amber-400 font-semibold">Disconnected</span>
               )}
             </div>
-            <div className="inline-flex items-center px-2.5 py-1 rounded-full bg-slate-800/80 border border-slate-700">
-              <span className="text-slate-400 mr-1.5">AI:</span>
+
+            {/* AI Status */}
+            <div className="inline-flex items-center px-2.5 py-1 rounded-full bg-[#151F32] border border-[#263247]" title="Google Gemini AI Engine">
+              <span className="text-[#94A3B8] mr-1.5 font-medium">AI:</span>
               {isAiConfigured ? (
-                <span className="text-cyan-400 font-medium flex items-center"><span className="w-1.5 h-1.5 rounded-full bg-cyan-400 mr-1 animate-pulse"></span>Gemini</span>
+                <span className="text-cyan-400 font-semibold flex items-center">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 mr-1"></span>Gemini
+                </span>
               ) : (
-                <span className="text-amber-400 font-medium">No Key</span>
+                <span className="text-amber-400 font-semibold">No Key</span>
               )}
             </div>
+
+            {/* Reader Mode Toggle (Genuine, accessible reading toggle) */}
+            <button
+              onClick={() => {
+                const nextMode = !readerMode;
+                setReaderMode(nextMode);
+                showNotification('info', nextMode ? '📖 Reader Mode Active: Distraction-free editorial view with spacious typography.' : 'Standard View Restored.');
+              }}
+              className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border transition ${
+                readerMode
+                  ? 'bg-cyan-950/80 border-cyan-400/50 text-cyan-300 shadow-sm shadow-cyan-500/20'
+                  : 'bg-[#151F32] border-[#263247] text-[#94A3B8] hover:text-white'
+              }`}
+              title="Toggle Reader Mode (improves article readability and text spacing)"
+            >
+              <span className="mr-1">{readerMode ? '📖' : '👓'}</span>
+              <span>{readerMode ? 'Reader On' : 'Reader Mode'}</span>
+            </button>
+
+            {/* Operator Auth Button */}
             <button
               onClick={() => {
                 setKeyInput(operatorKey);
                 setShowKeyModal(true);
               }}
-              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border transition ${
+              className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border transition ${
                 operatorKey
                   ? 'bg-amber-950/70 border-amber-500/40 text-amber-300 hover:bg-amber-900/60'
-                  : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
+                  : 'bg-[#151F32] border-[#263247] text-[#94A3B8] hover:text-[#F8FAFC]'
               }`}
-              title={operatorKey ? 'Operator Key active for this browser session. Click to manage.' : 'Reader mode. Click to enter Operator Key.'}
+              title={operatorKey ? 'Operator Key active for this session. Click to manage.' : 'Reader mode active. Click to unlock Operator Controls.'}
             >
               <span className="mr-1">{operatorKey ? '🔑' : '🔒'}</span>
-              <span>{operatorKey ? 'Operator Active' : 'Reader Mode'}</span>
+              <span>{operatorKey ? 'Operator Active' : 'Operator Key'}</span>
             </button>
           </div>
         </div>
       </header>
 
-      {/* ── Main ── */}
-      <main className="max-w-6xl mx-auto px-6 py-8 flex-1 w-full space-y-8">
+      {/* ── Main Container ── */}
+      <main className={`mx-auto px-4 sm:px-6 py-8 flex-1 w-full space-y-8 ${readerMode ? 'max-w-4xl' : 'max-w-6xl'}`}>
 
         {/* Operator Key Modal */}
         {showKeyModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
-            <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#080D1B]/80 backdrop-blur-sm animate-fadeIn">
+            <div className="bg-[#10182A] border border-[#263247] rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="text-sm font-bold text-white flex items-center space-x-2">
                     <span>🔑</span>
                     <span>Operator Authentication</span>
                   </h3>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Privileged operations (news ingestion, AI analysis, article retries, and episode generation) require an operator key.
+                  <p className="text-xs text-[#94A3B8] mt-1">
+                    Privileged operations (RSS ingestion, AI analysis, article retries, and broadcast generation) require an operator secret key.
                   </p>
                 </div>
                 <button
@@ -498,10 +628,10 @@ export default function App() {
                   value={keyInput}
                   onChange={(e) => setKeyInput(e.target.value)}
                   placeholder="Enter OPERATOR_API_KEY..."
-                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition"
+                  className="w-full bg-[#080D1B] border border-[#263247] focus:border-amber-400 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition"
                 />
-                <p className="text-[10px] text-slate-500">
-                  Stored exclusively in this browser tab's <code className="text-slate-400">sessionStorage</code>. Never stored in source code, URLs, or Git.
+                <p className="text-[10px] text-[#94A3B8]">
+                  Stored strictly in this browser tab's <code className="text-cyan-300">sessionStorage</code>. Never hardcoded into Git or public frontend bundles.
                 </p>
               </div>
 
@@ -514,14 +644,12 @@ export default function App() {
                   >
                     Clear Key
                   </button>
-                ) : (
-                  <div></div>
-                )}
+                ) : <div />}
                 <div className="flex items-center space-x-2">
                   <button
                     type="button"
                     onClick={() => setShowKeyModal(false)}
-                    className="px-4 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition"
+                    className="px-4 py-1.5 rounded-lg text-xs font-semibold text-[#94A3B8] hover:text-white transition"
                   >
                     Cancel
                   </button>
@@ -538,87 +666,231 @@ export default function App() {
           </div>
         )}
 
-        {/* Notification Banner */}
+        {/* Notification Toast */}
         {notification && (
-          <div className={`p-4 rounded-xl border text-xs flex items-center justify-between ${
-            notification.type === 'error' ? 'bg-rose-950/40 border-rose-500/40 text-rose-200'
-            : notification.type === 'info' ? 'bg-amber-950/40 border-amber-500/40 text-amber-200'
-            : 'bg-cyan-950/40 border-cyan-500/40 text-cyan-200'
+          <div className={`p-4 rounded-xl border text-xs flex items-center justify-between shadow-lg animate-fadeIn ${
+            notification.type === 'error' ? 'bg-rose-950/80 border-rose-500/50 text-rose-200'
+            : notification.type === 'warning' ? 'bg-amber-950/80 border-amber-500/50 text-amber-200'
+            : notification.type === 'info' ? 'bg-[#151F32] border-cyan-500/40 text-cyan-200'
+            : 'bg-emerald-950/80 border-emerald-500/50 text-emerald-200'
           }`}>
-            <div className="flex items-center space-x-2">
-              <span>{notification.type === 'error' ? '⚠️' : notification.type === 'info' ? 'ℹ️' : '✅'}</span>
-              <span>{notification.message}</span>
+            <div className="flex items-center space-x-2.5">
+              <span className="text-base">{notification.type === 'error' ? '⚠️' : notification.type === 'warning' ? '⚠️' : notification.type === 'info' ? 'ℹ️' : '✅'}</span>
+              <span className="font-medium leading-relaxed">{notification.message}</span>
             </div>
-            <button onClick={() => setNotification(null)} className="text-slate-400 hover:text-white ml-4 font-bold">✕</button>
+            <button onClick={() => setNotification(null)} className="text-slate-400 hover:text-white ml-4 font-bold text-sm">✕</button>
           </div>
         )}
 
-        {/* Tab Navigation */}
-        <div className="flex space-x-1 bg-slate-900/60 border border-slate-800 p-1 rounded-xl w-fit">
+        {/* ── Compact Dashboard Overview (Section 6) ── */}
+        {!readerMode && (
+          <section className="bg-[#10182A] border border-[#263247] rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-bold text-white tracking-tight">Your technology briefing</h2>
+                <p className="text-xs text-[#94A3B8]">Today's stories, AI insights, and the latest broadcast.</p>
+              </div>
+              <div className="text-[11px] text-cyan-400 font-mono bg-cyan-950/50 border border-cyan-500/30 px-3 py-1 rounded-full w-fit">
+                Asia/Kolkata (IST) Active
+              </div>
+            </div>
+
+            {/* 4 Interactive Metric Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1">
+              
+              {/* Card 1: Total Stories */}
+              <button
+                onClick={() => { setActiveTab('articles'); setActiveFilter('all'); }}
+                className="bg-[#151F32] hover:bg-[#151F32]/80 border border-[#263247] rounded-xl p-4 text-left transition group space-y-1"
+              >
+                <div className="flex items-center justify-between text-xs text-[#94A3B8]">
+                  <span>Total Stories</span>
+                  <span className="text-cyan-400 opacity-60 group-hover:opacity-100 transition">📰</span>
+                </div>
+                <div className="text-2xl font-bold text-white">{articles.length}</div>
+                <div className="text-[11px] text-[#94A3B8]">From major tech RSS feeds</div>
+              </button>
+
+              {/* Card 2: AI Analyzed */}
+              <button
+                onClick={() => { setActiveTab('articles'); setActiveFilter('completed'); }}
+                className="bg-[#151F32] hover:bg-[#151F32]/80 border border-[#263247] rounded-xl p-4 text-left transition group space-y-1"
+              >
+                <div className="flex items-center justify-between text-xs text-[#94A3B8]">
+                  <span>AI Analyzed</span>
+                  <span className="text-emerald-400 opacity-60 group-hover:opacity-100 transition">✨</span>
+                </div>
+                <div className="text-2xl font-bold text-emerald-400">{completedCount}</div>
+                <div className="text-[11px] text-emerald-400/80">
+                  {articles.length > 0 ? `${Math.round((completedCount / articles.length) * 100)}% coverage` : '0%'}
+                </div>
+              </button>
+
+              {/* Card 3: Pending Queue */}
+              <button
+                onClick={() => { setActiveTab('articles'); setActiveFilter('pending'); }}
+                className="bg-[#151F32] hover:bg-[#151F32]/80 border border-[#263247] rounded-xl p-4 text-left transition group space-y-1"
+              >
+                <div className="flex items-center justify-between text-xs text-[#94A3B8]">
+                  <span>Pending Queue</span>
+                  <span className="text-amber-400 opacity-60 group-hover:opacity-100 transition">⏳</span>
+                </div>
+                <div className="text-2xl font-bold text-amber-400">{pendingCount}</div>
+                <div className="text-[11px] text-amber-400/80">Ready for batch analysis</div>
+              </button>
+
+              {/* Card 4: Daily Broadcasts */}
+              <button
+                onClick={() => setActiveTab('episodes')}
+                className="bg-[#151F32] hover:bg-[#151F32]/80 border border-[#263247] rounded-xl p-4 text-left transition group space-y-1"
+              >
+                <div className="flex items-center justify-between text-xs text-[#94A3B8]">
+                  <span>Broadcasts</span>
+                  <span className="text-blue-400 opacity-60 group-hover:opacity-100 transition">🎙️</span>
+                </div>
+                <div className="text-2xl font-bold text-blue-400">{episodes.length}</div>
+                <div className="text-[11px] text-blue-400/80">Spoken voice audio episodes</div>
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* ── Primary Navigation Tabs ── */}
+        <nav className="flex items-center space-x-1.5 bg-[#10182A] border border-[#263247] p-1.5 rounded-2xl w-full sm:w-fit overflow-x-auto">
           <button
             onClick={() => setActiveTab('articles')}
-            className={`px-5 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'articles' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center space-x-2 flex-shrink-0 ${
+              activeTab === 'articles'
+                ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-sm'
+                : 'text-[#94A3B8] hover:text-white hover:bg-[#151F32]'
+            }`}
           >
-            📰 Articles Feed
+            <span>📰</span>
+            <span>Articles Feed</span>
+            <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-[#151F32] text-slate-300">
+              {articles.length}
+            </span>
           </button>
+
           <button
             onClick={() => setActiveTab('episodes')}
-            className={`px-5 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'episodes' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center space-x-2 flex-shrink-0 ${
+              activeTab === 'episodes'
+                ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-sm'
+                : 'text-[#94A3B8] hover:text-white hover:bg-[#151F32]'
+            }`}
           >
-            🎙️ Episodes
+            <span>🎙️</span>
+            <span>Daily Broadcasts</span>
+            <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-[#151F32] text-slate-300">
+              {episodes.length}
+            </span>
           </button>
+
           <button
             onClick={() => setActiveTab('analytics')}
-            className={`px-5 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'analytics' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center space-x-2 flex-shrink-0 ${
+              activeTab === 'analytics'
+                ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-sm'
+                : 'text-[#94A3B8] hover:text-white hover:bg-[#151F32]'
+            }`}
           >
-            📊 Analytics Trends
+            <span>📊</span>
+            <span>Platform Trends</span>
           </button>
-        </div>
+        </nav>
 
-        {/* ════════════ ARTICLES TAB ════════════ */}
+        {/* ══════════════════════════════════════════════════════════════════════════
+            TAB 1: ARTICLES FEED
+        ══════════════════════════════════════════════════════════════════════════ */}
         {activeTab === 'articles' && (
-          <div className="space-y-6">
-            {/* Actions Bar */}
-            <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4">
-              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          <div className="space-y-6 animate-fadeIn">
+            
+            {/* Toolbar: Grouped Primary Actions & Filters */}
+            <div className="bg-[#10182A] border border-[#263247] p-4 sm:p-5 rounded-2xl flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+              
+              {/* Primary Actions Group */}
+              <div className="flex flex-wrap items-center gap-2.5">
                 <button
                   onClick={handleProcessAI}
                   disabled={isProcessingAI || !isDbConnected || pendingCount === 0}
-                  className={`px-4 py-2.5 rounded-xl text-xs font-semibold transition flex items-center space-x-2 ${
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 shadow-sm ${
                     isProcessingAI || !isDbConnected || pendingCount === 0
-                      ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/10'
+                      ? 'bg-[#151F32] text-slate-500 border border-[#263247] cursor-not-allowed'
+                      : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-extrabold shadow-md shadow-cyan-500/20'
                   }`}
+                  title={operatorKey ? 'Analyze pending stories using Gemini' : 'Requires Operator Key'}
                 >
                   {isProcessingAI ? (
-                    <><span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span><span>Analyzing in parallel (~5-8s)...</span></>
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></span>
+                      <span>Analyzing Stories (~5-8s)...</span>
+                    </>
                   ) : pendingCount === 0 ? (
                     <span>✅ All Articles Analyzed ({completedCount})</span>
                   ) : (
                     <span>✨ Process with AI (Next 3 · {pendingCount} pending)</span>
                   )}
                 </button>
+
                 <button
                   onClick={handleIngestNews}
                   disabled={isIngesting || !isDbConnected}
-                  className="px-4 py-2.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center space-x-1.5"
+                  className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-[#151F32] hover:bg-[#263247] text-[#F8FAFC] border border-[#263247] transition flex items-center space-x-2"
+                  title={operatorKey ? 'Fetch latest RSS updates' : 'Requires Operator Key'}
                 >
-                  {isIngesting ? <><span className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span><span>Fetching RSS...</span></> : <span>📥 Ingest Latest RSS</span>}
+                  {isIngesting ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></span>
+                      <span>Fetching RSS Headlines...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>📥</span>
+                      <span>Ingest Latest RSS</span>
+                    </>
+                  )}
                 </button>
               </div>
-              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
-                <div className="bg-slate-950 p-1 rounded-xl border border-slate-800 flex text-xs">
-                  {['all', 'completed', 'pending'].map(f => (
-                    <button key={f} onClick={() => setActiveFilter(f)}
-                      className={`px-3 py-1.5 rounded-lg transition capitalize ${activeFilter === f ? 'bg-slate-800 text-white font-medium' : 'text-slate-400 hover:text-slate-200'}`}>
-                      {f === 'completed' ? 'AI Analyzed' : f === 'pending' ? 'Pending' : 'All'}
+
+              {/* Filters & Sorting Controls Group */}
+              <div className="flex flex-wrap items-center gap-2.5 justify-start lg:justify-end">
+                {/* Status Filter Pills */}
+                <div className="bg-[#080D1B] p-1 rounded-xl border border-[#263247] flex text-xs">
+                  {[
+                    ['all', 'All Stories'],
+                    ['completed', 'AI Analyzed'],
+                    ['pending', 'Pending']
+                  ].map(([val, label]) => (
+                    <button
+                      key={val}
+                      onClick={() => setActiveFilter(val)}
+                      className={`px-3 py-1.5 rounded-lg transition font-medium ${
+                        activeFilter === val
+                          ? 'bg-[#151F32] text-cyan-300 shadow-sm border border-[#263247]'
+                          : 'text-[#94A3B8] hover:text-white'
+                      }`}
+                    >
+                      {label}
                     </button>
                   ))}
                 </div>
-                <div className="bg-slate-950 p-1 rounded-xl border border-slate-800 flex text-xs">
-                  {[['latest', 'Latest'], ['importance', '⭐ Importance']].map(([val, label]) => (
-                    <button key={val} onClick={() => setSortBy(val)}
-                      className={`px-3 py-1.5 rounded-lg transition ${sortBy === val ? 'bg-slate-800 text-cyan-400 font-medium' : 'text-slate-400 hover:text-slate-200'}`}>
+
+                {/* Sort Order Pills */}
+                <div className="bg-[#080D1B] p-1 rounded-xl border border-[#263247] flex text-xs">
+                  {[
+                    ['latest', '⏱️ Latest'],
+                    ['importance', '⭐ Importance']
+                  ].map(([val, label]) => (
+                    <button
+                      key={val}
+                      onClick={() => setSortBy(val)}
+                      className={`px-3 py-1.5 rounded-lg transition font-medium ${
+                        sortBy === val
+                          ? 'bg-[#151F32] text-cyan-300 shadow-sm border border-[#263247]'
+                          : 'text-[#94A3B8] hover:text-white'
+                      }`}
+                    >
                       {label}
                     </button>
                   ))}
@@ -626,226 +898,401 @@ export default function App() {
               </div>
             </div>
 
-            {/* Articles List */}
+            {/* Articles Feed List */}
             {loadingArticles ? (
-              <div className="py-20 text-center space-y-3">
-                <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                <p className="text-xs text-slate-400">Loading articles...</p>
+              <div className="py-24 text-center space-y-3">
+                <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                <p className="text-xs text-[#94A3B8]">Loading technology articles from database...</p>
               </div>
             ) : articles.length > 0 ? (
-              <div className="space-y-5">
-                {articles.map(article => {
+              <div className="space-y-4">
+                {articles.map((article) => {
                   const isCompleted = article.processing_status === 'completed';
                   const isFailed = article.processing_status === 'failed';
                   const keyPoints = Array.isArray(article.ai_key_points) ? article.ai_key_points : [];
+                  const isExpanded = !!expandedArticles[article.id];
+                  const importanceInfo = getImportanceDisplay(article.importance_score);
+
+                  // HTML Entity Decoded Clean Content
+                  const cleanTitle = decodeHtmlEntities(article.title);
+                  const cleanSummary = decodeHtmlEntities(article.ai_summary || article.summary || '');
+                  const cleanReason = decodeHtmlEntities(article.importance_reason || '');
+
                   return (
-                    <div key={article.id} className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 hover:border-slate-700 transition shadow-sm space-y-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-                        <div className="flex items-center space-x-2">
-                          <span className="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-medium">{article.source_name || 'Tech News'}</span>
-                          {article.ai_category && <span className="px-2.5 py-1 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-medium">{article.ai_category}</span>}
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          {isCompleted && article.importance_score && (
-                            <span className={`px-3 py-1 rounded-full font-bold border flex items-center space-x-1 ${statusColor(article.importance_score)}`}>
-                              <span>⭐ {article.importance_score}/100</span>
+                    <article
+                      key={article.id}
+                      className={`bg-[#10182A] border border-[#263247] rounded-2xl p-5 sm:p-6 hover:border-slate-600/80 transition-all shadow-sm space-y-3.5 ${
+                        readerMode ? 'text-base leading-relaxed' : ''
+                      }`}
+                    >
+                      {/* Top Metadata: Publisher, Category, Importance */}
+                      <div className="flex flex-wrap items-center justify-between gap-2.5 text-xs">
+                        <div className="flex items-center flex-wrap gap-2">
+                          <span className="px-2.5 py-0.5 rounded-full bg-[#151F32] text-[#F8FAFC] border border-[#263247] font-semibold text-[11px]">
+                            {article.source_name || 'Tech News'}
+                          </span>
+                          {article.ai_category && (
+                            <span className={`px-2.5 py-0.5 rounded-full border font-medium text-[11px] ${getCategoryBadgeStyle(article.ai_category)}`}>
+                              {article.ai_category}
                             </span>
                           )}
-                          {!isCompleted && !isFailed && <span className="px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">⏳ Pending</span>}
+                        </div>
+
+                        {/* Status / Score Badges */}
+                        <div className="flex items-center space-x-2">
+                          {isCompleted && article.importance_score && (
+                            <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border flex items-center space-x-1 ${importanceInfo.badge}`}>
+                              <span>⭐ {article.importance_score}/100</span>
+                              <span className="hidden sm:inline-block font-normal text-[10px] opacity-80">({importanceInfo.label})</span>
+                            </span>
+                          )}
+                          {!isCompleted && !isFailed && (
+                            <span className="px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/30 text-xs font-medium">
+                              ⏳ Pending Analysis
+                            </span>
+                          )}
                           {isFailed && (
                             <div className="flex items-center space-x-2">
-                              <span className="px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20">⚠️ Failed</span>
-                              <button onClick={() => handleRetryArticle(article.id)} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs">Retry</button>
+                              <span className="px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/30 text-xs font-medium">
+                                ⚠️ Analysis Failed
+                              </span>
+                              <button
+                                onClick={() => handleRetryArticle(article.id)}
+                                className="px-2.5 py-0.5 rounded bg-[#151F32] hover:bg-[#263247] text-slate-200 border border-[#263247] text-xs font-medium transition"
+                              >
+                                Retry
+                              </button>
                             </div>
                           )}
                         </div>
                       </div>
-                      <h3 className="text-xl font-bold text-white leading-snug">{article.title}</h3>
+
+                      {/* Main Headline (Prominent, Scannable) */}
+                      <h3 className="text-lg sm:text-xl font-bold text-[#F8FAFC] leading-snug tracking-tight">
+                        <a
+                          href={article.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-cyan-400 transition"
+                        >
+                          {cleanTitle}
+                        </a>
+                      </h3>
+
+                      {/* AI Structured Editorial Box */}
                       {isCompleted && (
-                        <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl p-4 space-y-3">
+                        <div className="bg-[#080D1B]/90 border border-[#263247] rounded-xl p-4 space-y-3">
                           <div>
-                            <div className="text-[11px] font-bold uppercase tracking-wider text-cyan-400 mb-1">🤖 AI Summary</div>
-                            <p className="text-sm text-slate-200 leading-relaxed">{article.ai_summary}</p>
+                            <div className="text-[11px] font-bold uppercase tracking-wider text-cyan-400 mb-1 flex items-center space-x-1.5">
+                              <span>🤖</span>
+                              <span>AI Editorial Summary</span>
+                            </div>
+                            <p className="text-sm text-slate-200 leading-relaxed">
+                              {cleanSummary}
+                            </p>
                           </div>
+
+                          {/* Key Takeaways */}
                           {keyPoints.length > 0 && (
-                            <div className="pt-2 border-t border-slate-800/60">
-                              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Key Takeaways</div>
-                              <ul className="space-y-1 text-xs text-slate-300">
-                                {keyPoints.map((pt, i) => <li key={i} className="flex items-start space-x-2"><span className="text-cyan-400 mt-1">•</span><span>{pt}</span></li>)}
+                            <div className="pt-2.5 border-t border-[#263247]">
+                              <div className="text-[11px] font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
+                                Key Takeaways
+                              </div>
+                              <ul className="space-y-1.5 text-xs text-slate-300">
+                                {keyPoints.map((pt, i) => (
+                                  <li key={i} className="flex items-start space-x-2">
+                                    <span className="text-cyan-400 font-bold mt-0.5">•</span>
+                                    <span>{decodeHtmlEntities(pt)}</span>
+                                  </li>
+                                ))}
                               </ul>
                             </div>
                           )}
-                          {article.importance_reason && (
-                            <div className="pt-2 border-t border-slate-800/60 text-xs text-slate-400 italic">
-                              <span className="font-semibold text-slate-300">Rationale: </span>"{article.importance_reason}"
+
+                          {/* Editorial Rationale */}
+                          {cleanReason && (
+                            <div className="pt-2.5 border-t border-[#263247] text-xs text-[#94A3B8]">
+                              <span className="font-semibold text-slate-300">Scoring Rationale: </span>
+                              <span className="italic">"{cleanReason}"</span>
                             </div>
                           )}
                         </div>
                       )}
-                      {!isCompleted && article.summary && <p className="text-xs text-slate-400 line-clamp-3 leading-relaxed">{article.summary}</p>}
-                      {isFailed && article.processing_error && (
-                        <div className="p-2.5 rounded-lg bg-rose-950/30 border border-rose-500/20 text-xs text-rose-300">
-                          <strong>Failure:</strong> {article.processing_error}
+
+                      {/* Fallback Raw RSS Summary for Pending Articles */}
+                      {!isCompleted && cleanSummary && (
+                        <div className="text-xs text-[#94A3B8] leading-relaxed">
+                          <p className={isExpanded ? '' : 'line-clamp-3'}>
+                            {cleanSummary}
+                          </p>
+                          {cleanSummary.length > 180 && (
+                            <button
+                              onClick={() => setExpandedArticles(prev => ({ ...prev, [article.id]: !prev[article.id] }))}
+                              className="text-cyan-400 hover:text-cyan-300 text-[11px] font-medium pt-1 block"
+                            >
+                              {isExpanded ? 'Show less' : 'Read more...'}
+                            </button>
+                          )}
                         </div>
                       )}
-                      <div className="pt-3 border-t border-slate-800/60 flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2">
-                        <span>Published {article.published_at ? new Date(article.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Recently'} by {article.author || article.source_name}</span>
-                        <a href={article.url} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 font-medium flex items-center space-x-1"><span>Read Original</span><span>↗</span></a>
+
+                      {/* Error Diagnostic if Failed */}
+                      {isFailed && article.processing_error && (
+                        <div className="p-3 rounded-lg bg-rose-950/40 border border-rose-500/30 text-xs text-rose-300">
+                          <strong>Failure Reason:</strong> {article.processing_error}
+                        </div>
+                      )}
+
+                      {/* Card Footer: Timestamp, Author & Outbound Link */}
+                      <div className="pt-2 border-t border-[#263247] flex flex-wrap items-center justify-between text-xs text-[#94A3B8] gap-2">
+                        <div className="flex items-center space-x-2">
+                          <span>{formatRelativeTime(article.published_at)}</span>
+                          {article.author && <span>· By {article.author}</span>}
+                        </div>
+                        <a
+                          href={article.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-cyan-400 hover:text-cyan-300 font-semibold flex items-center space-x-1"
+                        >
+                          <span>Original Source</span>
+                          <span>↗</span>
+                        </a>
                       </div>
-                    </div>
+                    </article>
                   );
                 })}
               </div>
             ) : (
-              <div className="text-center py-16 bg-slate-900/40 border border-slate-800/60 rounded-2xl p-8 space-y-4">
+              <div className="text-center py-20 bg-[#10182A] border border-[#263247] rounded-2xl p-8 space-y-3">
                 <div className="text-4xl">📭</div>
                 <h3 className="text-base font-bold text-white">No Articles Found</h3>
-                <p className="text-xs text-slate-400">Change the filter or click "Ingest Latest RSS" to fetch new stories.</p>
+                <p className="text-xs text-[#94A3B8] max-w-sm mx-auto">
+                  Adjust your filter or click "Ingest Latest RSS" above to fetch the latest headlines.
+                </p>
               </div>
             )}
           </div>
         )}
 
-        {/* ════════════ EPISODES TAB ════════════ */}
+        {/* ══════════════════════════════════════════════════════════════════════════
+            TAB 2: DAILY BROADCASTS (EPISODES) & RAG ENGINE
+        ══════════════════════════════════════════════════════════════════════════ */}
         {activeTab === 'episodes' && (
-          <div className="space-y-6">
-            {/* Episode Actions Bar */}
-            <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="space-y-8 animate-fadeIn">
+            
+            {/* Episode Generation Action Banner */}
+            <div className="bg-[#10182A] border border-[#263247] p-5 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div>
-                <h3 className="text-sm font-bold text-white">Generate Today's Episode</h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Requires ≥3 AI-analyzed articles. Generates script + audio via Google Gemini.
+                <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+                  <span>🎙️</span>
+                  <span>Daily Radio Broadcast Pipeline</span>
+                </h3>
+                <p className="text-xs text-[#94A3B8] mt-0.5">
+                  Synthesizes daily broadcast script and voice audio from top-scoring tech news via Google Gemini.
                 </p>
               </div>
               <button
                 onClick={handleGenerateEpisode}
                 disabled={isGeneratingEpisode || !isDbConnected || completedCount < 3}
-                className={`px-5 py-3 rounded-xl text-sm font-semibold transition flex items-center space-x-2 shadow-lg ${
+                className={`px-5 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 flex-shrink-0 ${
                   isGeneratingEpisode || !isDbConnected || completedCount < 3
-                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-cyan-500/20'
+                    ? 'bg-[#151F32] text-slate-500 border border-[#263247] cursor-not-allowed'
+                    : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-extrabold shadow-md shadow-cyan-500/20'
                 }`}
+                title={operatorKey ? 'Generate daily episode' : 'Requires Operator Key'}
               >
                 {isGeneratingEpisode ? (
-                  <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span><span>Generating episode... (~30s)</span></>
-                ) : completedCount < 3 ? (
-                  <span>🔒 Need ≥3 AI-analyzed articles (have {completedCount})</span>
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></span>
+                    <span>Synthesizing Voice Audio (~20-30s)...</span>
+                  </>
                 ) : (
-                  <span>🎙️ Generate Today's Episode</span>
+                  <span>⚡ Generate Today's Broadcast</span>
                 )}
               </button>
             </div>
 
-            {/* AI Disclaimer */}
-            <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/20 text-xs text-amber-200 flex items-start space-x-3">
-              <span className="text-lg mt-0.5">⚠️</span>
-              <span>
-                <strong className="text-amber-300">Editorial Disclaimer:</strong> All episode scripts and audio are generated by AI (Google Gemini).
-                Summaries and commentary reflect automated analysis and <strong>have not been reviewed by a human editor</strong>.
-                Always verify facts against the linked original sources before sharing.
-              </span>
-            </div>
-
-            {/* Selected Episode Player */}
-            {selectedEpisode && (
-              <div className="bg-slate-900/80 border border-cyan-500/30 rounded-2xl p-6 space-y-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border mb-2 ${episodeStatusBadge(selectedEpisode.status)}`}>
-                      {selectedEpisode.status === 'audio_ready' ? '🎧 Ready to Play' : selectedEpisode.status}
+            {/* Featured Active Episode View */}
+            {selectedEpisode ? (
+              <div className="bg-[#10182A] border border-[#263247] rounded-2xl p-6 space-y-6 shadow-sm">
+                
+                {/* Header Information */}
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center space-x-2">
+                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${episodeStatusBadge(selectedEpisode.status)}`}>
+                        {selectedEpisode.status === 'audio_ready' ? '🎧 Ready to Stream' : selectedEpisode.status}
+                      </span>
+                      <span className="text-xs text-[#94A3B8]">
+                        Broadcast Date: {selectedEpisode.episode_date}
+                      </span>
                     </div>
-                    <h3 className="text-xl font-bold text-white">{selectedEpisode.title}</h3>
-                    <p className="text-xs text-slate-400 mt-1">
-                      {new Date(selectedEpisode.episode_date).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                      {selectedEpisode.duration_seconds && ` · ~${Math.round(selectedEpisode.duration_seconds / 60)} min`}
-                    </p>
+                    <h3 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+                      {selectedEpisode.title}
+                    </h3>
                   </div>
-                  <button onClick={() => setSelectedEpisode(null)} className="text-slate-500 hover:text-white text-lg">✕</button>
+                  
+                  {selectedEpisode.duration_seconds && (
+                    <div className="px-3 py-1 rounded-xl bg-[#151F32] border border-[#263247] text-xs font-mono text-cyan-300">
+                      Duration: ~{Math.round(selectedEpisode.duration_seconds / 60)} min ({selectedEpisode.duration_seconds}s)
+                    </div>
+                  )}
                 </div>
 
-                {/* Audio Player */}
-                {selectedEpisode.status === 'audio_ready' && selectedEpisode.audio_url && (
-                  <div className="bg-slate-950 rounded-xl p-4 border border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs text-slate-400 font-medium">🎵 Episode Audio</p>
-                      {selectedEpisode.duration_seconds && (
-                        <span className="text-[11px] text-slate-500 font-mono">
-                          Duration: {Math.floor(selectedEpisode.duration_seconds / 60)}:{(selectedEpisode.duration_seconds % 60).toString().padStart(2, '0')}
-                        </span>
-                      )}
-                    </div>
+                {/* ── Polished HTML5 Range Audio Player ── */}
+                {selectedEpisode.status === 'audio_ready' && resolvedAudioSrc && (
+                  <div className="bg-[#080D1B] rounded-2xl p-5 border border-[#263247] space-y-4">
+                    
+                    {/* Hidden Native Audio Element */}
                     <audio
                       ref={audioRef}
-                      controls
-                      className="w-full"
-                      src={selectedEpisode.audio_url.startsWith('http') ? selectedEpisode.audio_url : `${apiUrl}${selectedEpisode.audio_url}`}
-                      onError={() => setAudioError('Audio playback failed. Please check network connection or verify audio storage.')}
-                      onPlay={() => setAudioError(null)}
-                    >
-                      Your browser does not support the audio element.
-                    </audio>
+                      src={resolvedAudioSrc}
+                      preload="metadata"
+                      onTimeUpdate={() => {
+                        if (audioRef.current) setCurrentTime(audioRef.current.currentTime);
+                      }}
+                      onLoadedMetadata={() => {
+                        if (audioRef.current) setDuration(audioRef.current.duration || selectedEpisode.duration_seconds || 0);
+                      }}
+                      onEnded={() => setIsPlaying(false)}
+                      onError={() => {
+                        setAudioError('Audio playback failed. Please check network connection or verify audio storage.');
+                        setIsPlaying(false);
+                      }}
+                    />
+
+                    {/* Progress Slider */}
+                    <div className="space-y-1.5">
+                      <input
+                        type="range"
+                        min="0"
+                        max={duration || selectedEpisode.duration_seconds || 100}
+                        value={currentTime}
+                        onChange={handleSeek}
+                        className="w-full h-1.5 bg-[#263247] rounded-lg appearance-none cursor-pointer accent-cyan-400 focus:outline-none"
+                      />
+                      <div className="flex items-center justify-between text-[11px] font-mono text-[#94A3B8]">
+                        <span>{formatAudioTime(currentTime)}</span>
+                        <span>{formatAudioTime(duration || selectedEpisode.duration_seconds || 0)}</span>
+                      </div>
+                    </div>
+
+                    {/* Audio Player Controls */}
+                    <div className="flex items-center justify-between flex-wrap gap-3 pt-1">
+                      <div className="flex items-center space-x-3">
+                        <button
+                          onClick={togglePlayPause}
+                          className="h-10 w-10 rounded-full bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold flex items-center justify-center transition shadow-md shadow-cyan-500/20"
+                          title={isPlaying ? 'Pause' : 'Play'}
+                        >
+                          {isPlaying ? '⏸' : '▶'}
+                        </button>
+
+                        <button
+                          onClick={toggleMute}
+                          className="p-2 rounded-lg bg-[#151F32] hover:bg-[#263247] text-[#94A3B8] hover:text-white border border-[#263247] text-xs"
+                          title={isMuted ? 'Unmute' : 'Mute'}
+                        >
+                          {isMuted ? '🔇' : '🔊'}
+                        </button>
+                      </div>
+
+                      {/* Playback Speed Selectors */}
+                      <div className="flex items-center space-x-1 text-xs">
+                        <span className="text-[11px] text-[#94A3B8] mr-1.5">Speed:</span>
+                        {[1, 1.25, 1.5].map((speed) => (
+                          <button
+                            key={speed}
+                            onClick={() => changePlaybackSpeed(speed)}
+                            className={`px-2 py-1 rounded-lg text-xs font-semibold transition ${
+                              playbackSpeed === speed
+                                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                                : 'bg-[#151F32] text-[#94A3B8] border border-[#263247] hover:text-white'
+                            }`}
+                          >
+                            {speed}x
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Audio Error Alert */}
                     {audioError && (
-                      <p className="text-[11px] text-rose-400 pt-1">⚠️ {audioError}</p>
+                      <div className="p-3 rounded-lg bg-rose-950/40 border border-rose-500/30 text-xs text-rose-300">
+                        ⚠️ {audioError}
+                      </div>
                     )}
                   </div>
                 )}
 
-                {/* Source Articles */}
+                {/* Collapsible Transcript Viewer */}
+                {selectedEpisode.script && (
+                  <div className="pt-2 border-t border-[#263247]">
+                    <button
+                      onClick={() => setShowTranscript(!showTranscript)}
+                      className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold flex items-center space-x-1.5 py-1"
+                    >
+                      <span>{showTranscript ? '▲ Collapse Radio Broadcast Script' : '▼ Read Full Broadcast Script & Radio Copy'}</span>
+                    </button>
+                    {showTranscript && (
+                      <div className="mt-3 bg-[#080D1B] border border-[#263247] rounded-xl p-5 max-h-96 overflow-y-auto space-y-2">
+                        <p className="text-[11px] text-[#94A3B8] font-bold uppercase tracking-wider">
+                          📻 Radio Host Transcript
+                        </p>
+                        <p className="text-xs sm:text-sm text-slate-200 leading-relaxed whitespace-pre-wrap font-mono">
+                          {selectedEpisode.script}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Featured Stories in this Episode */}
                 {selectedEpisode.articles && selectedEpisode.articles.length > 0 && (
-                  <div>
-                    <h4 className="text-sm font-semibold text-white mb-3">📎 Stories in This Episode</h4>
-                    <div className="space-y-2">
-                      {selectedEpisode.articles.map((a, i) => (
-                        <div key={a.id} className="flex items-center justify-between bg-slate-950/60 border border-slate-800/80 rounded-lg px-4 py-2.5 text-xs">
-                          <div className="flex items-center space-x-3">
-                            <span className="text-slate-500 font-mono w-4">{i + 1}.</span>
-                            <div>
-                              <span className="text-slate-200 font-medium line-clamp-1">{a.title}</span>
-                              <div className="flex items-center space-x-2 mt-0.5">
-                                <span className="text-slate-500">{a.source_name}</span>
-                                {a.importance_score && <span className="text-cyan-400">⭐ {a.importance_score}</span>}
-                              </div>
-                            </div>
+                  <div className="pt-4 border-t border-[#263247] space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#94A3B8]">
+                      Stories Covered in this Broadcast ({selectedEpisode.articles.length})
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {selectedEpisode.articles.map((art, idx) => (
+                        <div key={art.id || idx} className="bg-[#080D1B] border border-[#263247] rounded-xl p-3.5 space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-bold text-cyan-400">Story #{art.story_order || idx + 1}</span>
+                            <span className="text-[#94A3B8]">{art.source_name}</span>
                           </div>
-                          <a href={a.url} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 ml-4 flex-shrink-0">↗</a>
+                          <div className="text-xs font-bold text-white line-clamp-2">
+                            {decodeHtmlEntities(art.title)}
+                          </div>
+                          <a
+                            href={art.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] text-cyan-400 hover:text-cyan-300 inline-block font-medium pt-1"
+                          >
+                            Read story source ↗
+                          </a>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* Transcript Toggle */}
-                {selectedEpisode.script && (
-                  <div>
-                    <button
-                      onClick={() => setShowTranscript(!showTranscript)}
-                      className="text-xs text-cyan-400 hover:text-cyan-300 font-medium flex items-center space-x-1"
-                    >
-                      <span>{showTranscript ? '▲ Hide Transcript' : '▼ Show Full Transcript'}</span>
-                    </button>
-                    {showTranscript && (
-                      <div className="mt-3 bg-slate-950/80 border border-slate-800/60 rounded-xl p-5 max-h-96 overflow-y-auto">
-                        <p className="text-xs text-slate-400 mb-3 font-medium uppercase tracking-wider">📄 Episode Transcript</p>
-                        <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap font-mono">{selectedEpisode.script}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* ── Ask This Episode (RAG Q&A) ── */}
-                <div className="pt-5 border-t border-slate-800/80 space-y-4">
-                  <div className="flex items-center justify-between">
+                {/* ── "Ask This Episode" Grounded RAG Interface (Section 9) ── */}
+                <div className="pt-6 border-t border-[#263247] space-y-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center space-x-2">
-                      <span className="text-base">💬</span>
+                      <span className="text-lg">💬</span>
                       <h4 className="text-sm font-bold text-white">Ask This Episode</h4>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-950/80 border border-cyan-500/40 text-cyan-300">
                         RAG Grounded
                       </span>
                     </div>
-                    <span className="text-[11px] text-slate-400">Powered by pgvector + Gemini</span>
+                    <span className="text-[11px] text-[#94A3B8]">Strict pgvector Cosine Search</span>
                   </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    Ask questions specifically about this broadcast. Answers are retrieved strictly from this episode's script and linked source articles.
+
+                  <p className="text-xs text-[#94A3B8] leading-relaxed">
+                    Ask questions specifically about today's broadcast. Answers are synthesized exclusively from this episode's transcript and verified source articles.
                   </p>
 
                   {/* Sample Prompt Pills */}
@@ -861,14 +1308,14 @@ export default function App() {
                         type="button"
                         onClick={() => handleAskEpisode(pill)}
                         disabled={askLoading}
-                        className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 border border-slate-700 transition"
+                        className="px-2.5 py-1 rounded-lg bg-[#151F32] hover:bg-[#263247] text-slate-300 border border-[#263247] transition text-[11px]"
                       >
                         "{pill}"
                       </button>
                     ))}
                   </div>
 
-                  {/* Input Form */}
+                  {/* Question Input Form */}
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
@@ -883,7 +1330,7 @@ export default function App() {
                         onChange={(e) => setAskQuestion(e.target.value.slice(0, 250))}
                         placeholder="Ask a question about this episode's stories..."
                         disabled={askLoading}
-                        className="w-full bg-slate-950/90 border border-slate-800 focus:border-cyan-500/80 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition pr-16"
+                        className="w-full bg-[#080D1B] border border-[#263247] focus:border-cyan-400 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition pr-16"
                       />
                       <span className="absolute right-3 top-3 text-[10px] text-slate-500">
                         {askQuestion.length}/250
@@ -892,16 +1339,16 @@ export default function App() {
                     <button
                       type="submit"
                       disabled={askLoading || !askQuestion.trim()}
-                      className={`px-5 py-2.5 rounded-xl text-xs font-semibold transition flex items-center justify-center space-x-1.5 flex-shrink-0 ${
+                      className={`px-5 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 flex-shrink-0 ${
                         askLoading || !askQuestion.trim()
-                          ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                          : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold shadow-md shadow-cyan-500/20'
+                          ? 'bg-[#151F32] text-slate-500 border border-[#263247] cursor-not-allowed'
+                          : 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-extrabold shadow-md shadow-cyan-500/20'
                       }`}
                     >
                       {askLoading ? (
                         <>
                           <span className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></span>
-                          <span>Searching...</span>
+                          <span>Searching Chunks...</span>
                         </>
                       ) : (
                         <span>Ask AI ↵</span>
@@ -909,372 +1356,303 @@ export default function App() {
                     </button>
                   </form>
 
-                  {/* Error display */}
+                  {/* Error Notification */}
                   {askError && (
-                    <div className="p-3 rounded-lg bg-rose-950/30 border border-rose-500/30 text-xs text-rose-300">
+                    <div className="p-3 rounded-lg bg-rose-950/40 border border-rose-500/30 text-xs text-rose-300">
                       ⚠️ {askError}
                     </div>
                   )}
 
-                  {/* Answer Card */}
+                  {/* Grounded / Refusal Answer Card */}
                   {askAnswer && (
-                    <div className={`border rounded-xl p-4 space-y-3 animate-fadeIn ${
-                      askAnswer.grounded ? 'bg-slate-950/90 border-cyan-500/30' : 'bg-slate-950/90 border-amber-500/30'
+                    <div className={`border rounded-xl p-4 sm:p-5 space-y-3 animate-fadeIn ${
+                      askAnswer.grounded
+                        ? 'bg-[#080D1B] border-cyan-500/40'
+                        : 'bg-[#080D1B] border-amber-500/40'
                     }`}>
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className={`font-semibold flex items-center space-x-1 ${
+                      <div className="flex items-center justify-between text-xs">
+                        <span className={`font-bold flex items-center space-x-1.5 ${
                           askAnswer.grounded ? 'text-cyan-400' : 'text-amber-400'
                         }`}>
-                          <span>{askAnswer.grounded ? '✨ Grounded Answer' : '⚠️ Assistant Notice'}</span>
+                          <span>{askAnswer.grounded ? '✨ Grounded Answer' : '⚠️ Refusal — Safe Anti-Hallucination Gate'}</span>
                         </span>
-                        {askAnswer.grounded ? (
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                            askAnswer.confidence === 'high' ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'
-                          }`}>
-                            {askAnswer.confidence === 'high' ? 'High Confidence' : 'Moderate Match'}
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-950/60 text-amber-300 border border-amber-500/30">
-                            {askAnswer.confidence === 'low' ? 'Fallback / Low Confidence' : 'Unmatched'}
-                          </span>
-                        )}
+
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                          askAnswer.grounded && askAnswer.confidence === 'high'
+                            ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40'
+                            : 'bg-slate-800 text-slate-400 border border-slate-700'
+                        }`}>
+                          {askAnswer.grounded ? (askAnswer.confidence === 'high' ? 'High Confidence' : 'Moderate Match') : 'Out of Scope'}
+                        </span>
                       </div>
-                      <p className="text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">
+
+                      <p className="text-xs sm:text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">
                         {askAnswer.answer}
                       </p>
 
-                      {/* Citations */}
+                      {/* Supporting Citations */}
                       {askAnswer.citations && askAnswer.citations.length > 0 && (
-                        <div className="pt-2 border-t border-slate-800/80">
-                          <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">
-                            📌 Cited Sources & Passages:
+                        <div className="pt-3 border-t border-[#263247]">
+                          <p className="text-[10px] text-[#94A3B8] uppercase tracking-wider font-semibold mb-2">
+                            📌 Verified Primary Sources:
                           </p>
-                          <div className="flex flex-wrap gap-1.5">
+                          <div className="flex flex-wrap gap-2">
                             {askAnswer.citations.map((cite, i) => (
                               <a
                                 key={i}
                                 href={cite.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center space-x-1 px-2.5 py-1 rounded bg-slate-900 border border-slate-800 hover:border-cyan-500/40 text-[11px] text-cyan-300 transition"
+                                className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-lg bg-[#151F32] border border-[#263247] hover:border-cyan-400/50 text-xs text-cyan-300 transition"
                               >
-                                <span className="line-clamp-1 max-w-[200px]">{cite.title}</span>
+                                <span className="line-clamp-1 max-w-[220px]">{decodeHtmlEntities(cite.title)}</span>
                                 <span>↗</span>
                               </a>
                             ))}
                           </div>
                         </div>
                       )}
-
-                      {askAnswer.grounded ? (
-                        <div className="text-[10px] text-slate-500 pt-1">
-                          ℹ️ Answer generated strictly using this episode's transcript and verified article summaries. Verify facts with original sources above.
-                        </div>
-                      ) : (
-                        <div className="text-[10px] text-amber-500/80 pt-1 flex items-center justify-between">
-                          <span>💡 If the AI service was momentarily busy, re-submitting your query will generate the grounded answer.</span>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
               </div>
-            )}
+            ) : null}
 
-            {/* Episode List */}
-            {loadingEpisodes ? (
-              <div className="py-16 text-center space-y-3">
-                <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                <p className="text-xs text-slate-400">Loading episodes...</p>
-              </div>
-            ) : episodes.length > 0 ? (
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">All Episodes</h3>
-                {episodes.map(ep => (
-                  <div
-                    key={ep.id}
-                    onClick={() => fetchEpisodeDetail(ep.id)}
-                    className={`bg-slate-900/60 border rounded-xl p-4 cursor-pointer hover:border-slate-700 transition flex items-center justify-between gap-4 ${selectedEpisode?.id === ep.id ? 'border-cyan-500/40' : 'border-slate-800/80'}`}
-                  >
-                    <div className="space-y-1">
-                      <div className="text-sm font-semibold text-white">{ep.title}</div>
-                      <div className="text-xs text-slate-500">
-                        {new Date(ep.episode_date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
-                        {ep.duration_seconds && ` · ~${Math.round(ep.duration_seconds / 60)} min`}
+            {/* Past Episodes Archive */}
+            <div className="space-y-4">
+              <h3 className="text-xs font-bold text-[#94A3B8] uppercase tracking-wider">
+                Broadcast Archive ({episodes.length})
+              </h3>
+              {loadingEpisodes ? (
+                <div className="py-12 text-center text-xs text-[#94A3B8]">Loading broadcasts...</div>
+              ) : episodes.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {episodes.map((ep) => (
+                    <button
+                      key={ep.id}
+                      onClick={() => fetchEpisodeDetail(ep.id)}
+                      className={`text-left p-4 rounded-xl border transition space-y-2 ${
+                        selectedEpisode?.id === ep.id
+                          ? 'bg-[#151F32] border-cyan-400/50 shadow-sm'
+                          : 'bg-[#10182A] border-[#263247] hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-cyan-400 font-mono">{ep.episode_date}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${episodeStatusBadge(ep.status)}`}>
+                          {ep.status === 'audio_ready' ? '🎧 Audio' : ep.status}
+                        </span>
                       </div>
-                    </div>
-                    <div className="flex items-center space-x-2 flex-shrink-0">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${episodeStatusBadge(ep.status)}`}>
-                        {ep.status === 'audio_ready' ? '🎧 Ready' : ep.status}
-                      </span>
-                      {ep.status === 'audio_ready' && <span className="text-slate-400 text-xs">▶ Play</span>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : !isGeneratingEpisode && (
-              <div className="text-center py-16 bg-slate-900/40 border border-slate-800/60 rounded-2xl p-8 space-y-4">
-                <div className="text-4xl">🎙️</div>
-                <h3 className="text-base font-bold text-white">No Episodes Yet</h3>
-                <p className="text-xs text-slate-400 max-w-md mx-auto">
-                  Make sure you have at least 3 AI-analyzed articles, then click "Generate Today's Episode" above!
-                </p>
-              </div>
-            )}
+                      <h4 className="text-sm font-bold text-white line-clamp-2">
+                        {ep.title}
+                      </h4>
+                      {ep.duration_seconds && (
+                        <p className="text-[11px] text-[#94A3B8]">
+                          Duration: ~{Math.round(ep.duration_seconds / 60)} min
+                        </p>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-16 bg-[#10182A] border border-[#263247] rounded-2xl p-6">
+                  <p className="text-xs text-[#94A3B8]">No broadcast episodes generated yet.</p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
-        {/* ════════════ ANALYTICS TAB ════════════ */}
+        {/* ══════════════════════════════════════════════════════════════════════════
+            TAB 3: PLATFORM TRENDS (ANALYTICS)
+        ══════════════════════════════════════════════════════════════════════════ */}
         {activeTab === 'analytics' && (
           <div className="space-y-8 animate-fadeIn">
-            {/* Header with Refresh */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 border border-slate-800 p-5 rounded-2xl">
+            
+            {/* Header with Refresh Button */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-[#10182A] border border-[#263247] p-5 rounded-2xl">
               <div>
                 <div className="flex items-center space-x-2">
-                  <h3 className="text-base font-bold text-white">Editorial & Platform Analytics</h3>
+                  <h3 className="text-base font-bold text-white">Platform & Editorial Intelligence</h3>
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-950/80 border border-cyan-500/40 text-cyan-300">
-                    Live from PostgreSQL
+                    Live from Neon PostgreSQL
                   </span>
                 </div>
-                <p className="text-xs text-slate-400 mt-1">
-                  Automated aggregation of ingestion volumes, AI analysis coverage, category distribution, and importance scoring.
+                <p className="text-xs text-[#94A3B8] mt-1">
+                  Real-time aggregation of news ingestion volumes, Gemini analysis coverage, canonical categories, and importance scores.
                 </p>
               </div>
               <button
                 onClick={fetchAnalytics}
                 disabled={loadingAnalytics}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center space-x-2 transition flex-shrink-0"
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#151F32] hover:bg-[#263247] text-white border border-[#263247] flex items-center space-x-2 transition flex-shrink-0"
               >
-                <span>{loadingAnalytics ? 'Refreshing...' : '🔄 Refresh Data'}</span>
+                <span>{loadingAnalytics ? 'Refreshing...' : '🔄 Refresh Metrics'}</span>
               </button>
             </div>
 
             {loadingAnalytics && !analyticsData ? (
               <div className="py-24 text-center space-y-3">
-                <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                <p className="text-xs text-slate-400">Loading platform trends from PostgreSQL...</p>
+                <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                <p className="text-xs text-[#94A3B8]">Aggregating platform intelligence from PostgreSQL...</p>
               </div>
             ) : analyticsData ? (
               <div className="space-y-8">
+                
                 {/* 4 Top KPI Cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  
                   {/* KPI 1 */}
-                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2">
-                    <span className="text-xs text-slate-400 font-medium">Total Stories Ingested</span>
+                  <div className="bg-[#10182A] border border-[#263247] rounded-2xl p-5 space-y-2">
+                    <span className="text-xs text-[#94A3B8] font-medium">Stories Ingested</span>
                     <div className="text-3xl font-extrabold text-white">
                       {analyticsData.kpis.totalArticles}
                     </div>
-                    <div className="text-[11px] text-slate-400 flex items-center space-x-1.5 pt-1">
+                    <div className="text-[11px] text-[#94A3B8] flex items-center space-x-1.5 pt-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
-                      <span>{analyticsData.kpis.pendingArticles} pending AI analysis</span>
+                      <span>{analyticsData.kpis.pendingArticles} pending Gemini processing</span>
                     </div>
                   </div>
 
                   {/* KPI 2 */}
-                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2">
-                    <span className="text-xs text-slate-400 font-medium">AI Analysis Coverage</span>
+                  <div className="bg-[#10182A] border border-[#263247] rounded-2xl p-5 space-y-2">
+                    <span className="text-xs text-[#94A3B8] font-medium">AI Analysis Coverage</span>
                     <div className="text-3xl font-extrabold text-cyan-400">
                       {analyticsData.kpis.analysisRate}%
                     </div>
-                    <div className="text-[11px] text-slate-400 flex items-center space-x-1.5 pt-1">
+                    <div className="text-[11px] text-[#94A3B8] flex items-center space-x-1.5 pt-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                      <span>{analyticsData.kpis.analyzedArticles} verified by Gemini</span>
+                      <span>{analyticsData.kpis.analyzedArticles} verified stories</span>
                     </div>
                   </div>
 
                   {/* KPI 3 */}
-                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2">
-                    <span className="text-xs text-slate-400 font-medium">Avg Story Importance</span>
+                  <div className="bg-[#10182A] border border-[#263247] rounded-2xl p-5 space-y-2">
+                    <span className="text-xs text-[#94A3B8] font-medium">Avg Importance Score</span>
                     <div className="text-3xl font-extrabold text-amber-400 flex items-baseline space-x-1">
                       <span>{analyticsData.kpis.avgImportanceScore}</span>
                       <span className="text-xs text-slate-500 font-normal">/100</span>
                     </div>
-                    <div className="text-[11px] text-slate-400 flex items-center space-x-1.5 pt-1">
+                    <div className="text-[11px] text-[#94A3B8] flex items-center space-x-1.5 pt-1">
                       <span>⭐ Editorial Rubric Score</span>
                     </div>
                   </div>
 
                   {/* KPI 4 */}
-                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 space-y-2">
-                    <span className="text-xs text-slate-400 font-medium">Audio Broadcasts</span>
+                  <div className="bg-[#10182A] border border-[#263247] rounded-2xl p-5 space-y-2">
+                    <span className="text-xs text-[#94A3B8] font-medium">Audio Broadcasts</span>
                     <div className="text-3xl font-extrabold text-blue-400">
                       {analyticsData.kpis.totalEpisodes}
                     </div>
-                    <div className="text-[11px] text-slate-400 flex items-center space-x-1.5 pt-1">
+                    <div className="text-[11px] text-[#94A3B8] flex items-center space-x-1.5 pt-1">
                       <span>🎙️ ~{analyticsData.kpis.totalAudioMinutes} min total spoken audio</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Grid: Category Distribution & Source Breakdown */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Category Distribution */}
-                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 space-y-5">
-                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
-                      <div>
-                        <h4 className="text-sm font-bold text-white">Topic & Category Distribution</h4>
-                        <p className="text-[11px] text-slate-400">Concentration across AI, Hardware, Security & Cloud</p>
-                      </div>
-                      <span className="text-xs text-slate-500 font-mono">{analyticsData.categories.length} Categories</span>
+                {/* Visual Category Distribution */}
+                <div className="bg-[#10182A] border border-[#263247] rounded-2xl p-6 space-y-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-bold text-white">Canonical Category Breakdown</h4>
+                      <p className="text-xs text-[#94A3B8]">Database-verified distribution of technology topics.</p>
                     </div>
-
-                    {analyticsData.categories.length > 0 ? (
-                      <div className="space-y-4">
-                        {analyticsData.categories.map((cat, idx) => {
-                          const maxCount = Math.max(...analyticsData.categories.map(c => c.storyCount), 1);
-                          const percentage = Math.round((cat.storyCount / maxCount) * 100);
-                          return (
-                            <div key={idx} className="space-y-1.5">
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="text-slate-200 font-medium">{cat.category}</span>
-                                <div className="flex items-center space-x-3 text-slate-400">
-                                  <span>{cat.storyCount} stories</span>
-                                  <span className="text-cyan-400 font-mono">avg {cat.avgScore}</span>
-                                </div>
-                              </div>
-                              <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
-                                <div
-                                  className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full transition-all duration-500"
-                                  style={{ width: `${percentage}%` }}
-                                ></div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8 text-xs text-slate-500">
-                        No category data yet. Process pending articles to generate category metrics.
-                      </div>
-                    )}
                   </div>
 
-                  {/* News Outlets Comparison */}
-                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 space-y-5">
-                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
-                      <div>
-                        <h4 className="text-sm font-bold text-white">Source Coverage & Output</h4>
-                        <p className="text-[11px] text-slate-400">Coverage volume and average impact by news outlet</p>
-                      </div>
-                      <span className="text-xs text-slate-500 font-mono">{analyticsData.sources.length} Feeds</span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {analyticsData.sources.map((src, idx) => (
-                        <div key={idx} className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-4 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-bold text-white">{src.sourceName}</span>
-                            <span className="text-xs font-semibold text-cyan-400 bg-cyan-950/80 border border-cyan-500/30 px-2 py-0.5 rounded">
-                              ⭐ {src.avgScore}
+                  <div className="space-y-3.5">
+                    {analyticsData.categories.map((cat, idx) => {
+                      const totalAnalyzed = analyticsData.kpis.analyzedArticles || 1;
+                      const percentage = Math.round((cat.storyCount / totalAnalyzed) * 100);
+                      return (
+                        <div key={idx} className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-semibold text-slate-200">{cat.category}</span>
+                            <span className="text-[#94A3B8] font-mono">
+                              {cat.storyCount} stories ({percentage}%) · Avg: {cat.avgScore}/100
                             </span>
                           </div>
-                          <div className="space-y-1 text-xs text-slate-400">
-                            <div className="flex justify-between">
-                              <span>Total Ingested:</span>
-                              <span className="text-slate-200 font-medium">{src.totalStories}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>AI Analyzed:</span>
-                              <span className="text-emerald-400 font-medium">{src.analyzedStories}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>Featured in Shows:</span>
-                              <span className="text-blue-400 font-medium">{src.episodesFeaturedIn}</span>
-                            </div>
+                          <div className="w-full bg-[#080D1B] rounded-full h-2 border border-[#263247] overflow-hidden">
+                            <div
+                              className="bg-gradient-to-r from-cyan-400 to-blue-500 h-2 rounded-full transition-all duration-500"
+                              style={{ width: `${Math.min(100, Math.max(4, percentage))}%` }}
+                            />
                           </div>
-                          <a
-                            href={src.websiteUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center space-x-1 text-[11px] text-cyan-400 hover:text-cyan-300 font-medium pt-1"
-                          >
-                            <span>Visit feed site</span>
-                            <span>↗</span>
-                          </a>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Editorial Leaderboard (Top 5 Stories) */}
+                {analyticsData.topStories && analyticsData.topStories.length > 0 && (
+                  <div className="bg-[#10182A] border border-[#263247] rounded-2xl p-6 space-y-4">
+                    <div>
+                      <h4 className="text-sm font-bold text-white">Editorial Leaderboard — Highest Importance Stories</h4>
+                      <p className="text-xs text-[#94A3B8]">Ranked by Gemini's technical innovation and market impact rubric.</p>
+                    </div>
+
+                    <div className="space-y-3">
+                      {analyticsData.topStories.map((story, i) => (
+                        <div
+                          key={story.id || i}
+                          className="bg-[#080D1B] border border-[#263247] rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                        >
+                          <div className="space-y-1 flex-1">
+                            <div className="flex items-center space-x-2 text-xs">
+                              <span className="font-bold text-cyan-400 font-mono">#{i + 1}</span>
+                              <span className="text-[#94A3B8]">{story.sourceName}</span>
+                              {story.category && (
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${getCategoryBadgeStyle(story.category)}`}>
+                                  {story.category}
+                                </span>
+                              )}
+                            </div>
+                            <h5 className="text-sm font-bold text-white leading-snug">
+                              {decodeHtmlEntities(story.title)}
+                            </h5>
+                            {story.importanceReason && (
+                              <p className="text-xs text-[#94A3B8] italic">
+                                "{decodeHtmlEntities(story.importanceReason)}"
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="flex items-center sm:flex-col items-end gap-2 flex-shrink-0">
+                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/40 font-mono">
+                              ⭐ {story.importanceScore}/100
+                            </span>
+                            <a
+                              href={story.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold"
+                            >
+                              Source ↗
+                            </a>
+                          </div>
                         </div>
                       ))}
                     </div>
                   </div>
-                </div>
-
-                {/* Editorial Leaderboard: Top 5 Highest Impact Stories */}
-                <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
-                    <div>
-                      <h4 className="text-sm font-bold text-white">🏆 Editorial Leaderboard — Highest Rated Stories</h4>
-                      <p className="text-[11px] text-slate-400">Ranked by Gemini objective evaluation rubric (1–100)</p>
-                    </div>
-                    <span className="text-xs text-slate-500 font-mono">Top 5 Stories</span>
-                  </div>
-
-                  <div className="space-y-3">
-                    {analyticsData.topStories.map((story, i) => (
-                      <div
-                        key={story.id}
-                        className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 hover:border-slate-700 transition flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
-                      >
-                        <div className="flex items-start space-x-3.5">
-                          <span className="w-6 h-6 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
-                            {i + 1}
-                          </span>
-                          <div className="space-y-1">
-                            <div className="flex items-center space-x-2 flex-wrap gap-1">
-                              <span className="text-xs text-cyan-400 font-semibold">{story.sourceName}</span>
-                              {story.category && (
-                                <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-400">
-                                  {story.category}
-                                </span>
-                              )}
-                              {story.author && (
-                                <span className="text-[10px] text-slate-500">by {story.author}</span>
-                              )}
-                            </div>
-                            <h5 className="text-xs md:text-sm font-medium text-slate-100 line-clamp-1">
-                              {story.title}
-                            </h5>
-                            {story.importanceReason && (
-                              <p className="text-[11px] text-slate-400 italic line-clamp-1">
-                                "{story.importanceReason}"
-                              </p>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center space-x-3 self-end md:self-center flex-shrink-0">
-                          <span className="px-3 py-1 rounded-lg text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                            ⭐ {story.importanceScore} / 100
-                          </span>
-                          <a
-                            href={story.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-3 py-1 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
-                          >
-                            Read ↗
-                          </a>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                )}
               </div>
             ) : (
-              <div className="text-center py-16 bg-slate-900/40 border border-slate-800/60 rounded-2xl p-8 space-y-4">
-                <div className="text-4xl">📊</div>
-                <h3 className="text-base font-bold text-white">No Analytics Data Yet</h3>
-                <p className="text-xs text-slate-400 max-w-md mx-auto">
-                  Click "Refresh Data" or ingest articles from the Articles Feed to generate live trends.
-                </p>
+              <div className="text-center py-20 bg-[#10182A] border border-[#263247] rounded-2xl p-6">
+                <p className="text-xs text-[#94A3B8]">No analytics data available yet.</p>
               </div>
             )}
           </div>
         )}
       </main>
 
-      {/* ── Footer ── */}
-      <footer className="border-t border-slate-800/80 py-6 text-center space-y-1">
-        <p className="text-xs text-slate-500">Tech Innovation News Show · Production Ready Full-Stack Platform</p>
-        <p className="text-[11px] text-slate-600">🤖 AI-generated content. Not editorially reviewed. Verify facts with original sources.</p>
+      {/* ── Polished Footer ── */}
+      <footer className="border-t border-[#263247] bg-[#10182A]/80 py-6 text-center space-y-1.5 px-4">
+        <p className="text-xs font-semibold text-slate-300">
+          Tech Innovation News Show · Production Ready Full-Stack Platform
+        </p>
+        <p className="text-[11px] text-[#94A3B8]">
+          🤖 Editorial insights synthesized via Google Gemini. Fact-check with primary publishers using original source links.
+        </p>
       </footer>
     </div>
   );
