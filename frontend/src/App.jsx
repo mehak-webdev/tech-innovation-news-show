@@ -31,12 +31,53 @@ export default function App() {
   const [analyticsData, setAnalyticsData] = useState(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
 
+  // Operator Mode State (Phase 1 Security: stored strictly in sessionStorage)
+  const [operatorKey, setOperatorKey] = useState(() => {
+    try {
+      return sessionStorage.getItem('tech_news_operator_key') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [keyInput, setKeyInput] = useState('');
+
   // Shared
   const [notification, setNotification] = useState(null);
   const [activeFilter, setActiveFilter] = useState('all');
   const [sortBy, setSortBy] = useState('latest');
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+  // ── Operator Auth Helpers ───────────────────────────────────────────────────
+  const getOperatorHeaders = () => {
+    const headers = { 'Content-Type': 'application/json' };
+    if (operatorKey) {
+      headers['X-Operator-Key'] = operatorKey;
+    }
+    return headers;
+  };
+
+  const handleSaveOperatorKey = (newKey) => {
+    const trimmed = (newKey || '').trim();
+    try {
+      if (trimmed) {
+        sessionStorage.setItem('tech_news_operator_key', trimmed);
+      } else {
+        sessionStorage.removeItem('tech_news_operator_key');
+      }
+    } catch (e) {
+      console.warn('sessionStorage is not accessible:', e);
+    }
+    setOperatorKey(trimmed);
+    setKeyInput('');
+    setShowKeyModal(false);
+    if (trimmed) {
+      showNotification('success', 'Operator key saved for this browser session.');
+    } else {
+      showNotification('info', 'Operator key cleared. Reverted to Reader Mode.');
+    }
+  };
 
   // ── Health check ────────────────────────────────────────────────────────────
   const checkBackend = async () => {
@@ -119,16 +160,34 @@ export default function App() {
     }
   };
 
-  // ── Ingest RSS ──────────────────────────────────────────────────────────────
+  // ── Ingest RSS (Protected Operator Route) ──────────────────────────────────
   const handleIngestNews = async () => {
+    if (!operatorKey) {
+      setShowKeyModal(true);
+      showNotification('info', 'Operator Authentication Required: Please enter your operator key to ingest news.');
+      return;
+    }
     setIsIngesting(true);
     try {
       const response = await fetch(`${apiUrl}/api/articles/ingest`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }
+        method: 'POST',
+        headers: getOperatorHeaders()
       });
       const data = await response.json();
+      if (response.status === 401) {
+        showNotification('error', `Authentication Failed (401): ${data.message || 'Invalid operator key.'}`);
+        setShowKeyModal(true);
+        return;
+      }
+      if (response.status === 429) {
+        showNotification('error', `Rate Limit Exceeded (429): ${data.message}`);
+        return;
+      }
       if (data.stats) {
         showNotification('success', `Ingestion Complete: Added ${data.stats.articlesInserted} new articles, skipped ${data.stats.duplicatesSkipped} duplicates.`);
+        await fetchArticles();
+      } else {
+        showNotification('info', data.message || 'Ingestion completed');
         await fetchArticles();
       }
     } catch (err) {
@@ -138,17 +197,33 @@ export default function App() {
     }
   };
 
-  // ── AI Processing ───────────────────────────────────────────────────────────
+  // ── AI Processing (Protected Operator Route) ────────────────────────────────
   const handleProcessAI = async () => {
+    if (!operatorKey) {
+      setShowKeyModal(true);
+      showNotification('info', 'Operator Authentication Required: Please enter your operator key to run AI analysis.');
+      return;
+    }
     setIsProcessingAI(true);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 20000);
     try {
       const response = await fetch(`${apiUrl}/api/articles/process?limit=3`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal
+        method: 'POST',
+        headers: getOperatorHeaders(),
+        signal: controller.signal
       });
       clearTimeout(timeoutId);
       const data = await response.json();
+      if (response.status === 401) {
+        showNotification('error', `Authentication Failed (401): ${data.message || 'Invalid operator key.'}`);
+        setShowKeyModal(true);
+        return;
+      }
+      if (response.status === 429) {
+        showNotification('error', `Rate Limit Exceeded (429): ${data.message}`);
+        return;
+      }
       if (data.stats) {
         showNotification('success', `AI Processing Complete: Analyzed ${data.stats.succeeded} articles (${data.stats.failed} failed).`);
         await fetchArticles();
@@ -169,8 +244,13 @@ export default function App() {
     }
   };
 
-  // ── Generate Episode ────────────────────────────────────────────────────────
+  // ── Generate Episode (Protected Operator Route) ─────────────────────────────
   const handleGenerateEpisode = async () => {
+    if (!operatorKey) {
+      setShowKeyModal(true);
+      showNotification('info', 'Operator Authentication Required: Please enter your operator key to generate daily episodes.');
+      return;
+    }
     setIsGeneratingEpisode(true);
     setSelectedEpisode(null);
     const controller = new AbortController();
@@ -178,11 +258,20 @@ export default function App() {
     try {
       const response = await fetch(`${apiUrl}/api/episodes/generate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getOperatorHeaders(),
         signal: controller.signal
       });
       clearTimeout(timeoutId);
       const data = await response.json();
+      if (response.status === 401) {
+        showNotification('error', `Authentication Failed (401): ${data.message || 'Invalid operator key.'}`);
+        setShowKeyModal(true);
+        return;
+      }
+      if (response.status === 429) {
+        showNotification('error', `Rate Limit Exceeded (429): ${data.message}`);
+        return;
+      }
       if (data.episode?.status === 'audio_ready') {
         showNotification('success', `Episode generated! "${data.episode.title}" is ready to play.`);
         setSelectedEpisode(null);
@@ -206,7 +295,7 @@ export default function App() {
     }
   };
 
-  // ── Ask This Episode (RAG Q&A) ──────────────────────────────────────────────
+  // ── Ask This Episode (Public Rate-Limited RAG Q&A) ───────────────────────────
   const handleAskEpisode = async (customQ) => {
     const q = (typeof customQ === 'string' ? customQ : askQuestion).trim();
     if (!q || !selectedEpisode) return;
@@ -222,8 +311,11 @@ export default function App() {
         body: JSON.stringify({ question: q })
       });
       const data = await response.json();
+      if (response.status === 429) {
+        throw new Error(data.message || 'Rate limit exceeded: Please wait before asking another question.');
+      }
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to get answer');
+        throw new Error(data.message || data.error || 'Failed to get answer');
       }
       setAskAnswer(data);
     } catch (err) {
@@ -233,16 +325,33 @@ export default function App() {
     }
   };
 
-  // ── Retry article ───────────────────────────────────────────────────────────
+  // ── Retry article (Protected Operator Route) ────────────────────────────────
   const handleRetryArticle = async (id) => {
+    if (!operatorKey) {
+      setShowKeyModal(true);
+      showNotification('info', 'Operator Authentication Required: Please enter your operator key to reprocess articles.');
+      return;
+    }
     try {
-      const response = await fetch(`${apiUrl}/api/articles/${id}/retry`, { method: 'POST' });
+      const response = await fetch(`${apiUrl}/api/articles/${id}/retry`, {
+        method: 'POST',
+        headers: getOperatorHeaders()
+      });
       const data = await response.json();
+      if (response.status === 401) {
+        showNotification('error', `Authentication Failed (401): ${data.message || 'Invalid operator key.'}`);
+        setShowKeyModal(true);
+        return;
+      }
+      if (response.status === 429) {
+        showNotification('error', `Rate Limit Exceeded (429): ${data.message}`);
+        return;
+      }
       if (response.ok) {
         showNotification('success', `Article #${id} reprocessed successfully!`);
         await fetchArticles();
       } else {
-        showNotification('error', data.error || 'Retry failed');
+        showNotification('error', data.message || data.error || 'Retry failed');
       }
     } catch (err) {
       showNotification('error', `Retry failed: ${err.message}`);
@@ -324,12 +433,98 @@ export default function App() {
                 <span className="text-amber-400 font-medium">No Key</span>
               )}
             </div>
+            <button
+              onClick={() => {
+                setKeyInput(operatorKey);
+                setShowKeyModal(true);
+              }}
+              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border transition ${
+                operatorKey
+                  ? 'bg-amber-950/70 border-amber-500/40 text-amber-300 hover:bg-amber-900/60'
+                  : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
+              }`}
+              title={operatorKey ? 'Operator Key active for this browser session. Click to manage.' : 'Reader mode. Click to enter Operator Key.'}
+            >
+              <span className="mr-1">{operatorKey ? '🔑' : '🔒'}</span>
+              <span>{operatorKey ? 'Operator Active' : 'Reader Mode'}</span>
+            </button>
           </div>
         </div>
       </header>
 
       {/* ── Main ── */}
       <main className="max-w-6xl mx-auto px-6 py-8 flex-1 w-full space-y-8">
+
+        {/* Operator Key Modal */}
+        {showKeyModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
+            <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+                    <span>🔑</span>
+                    <span>Operator Authentication</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Privileged operations (news ingestion, AI analysis, article retries, and episode generation) require an operator key.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowKeyModal(false)}
+                  className="text-slate-400 hover:text-white text-base font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+                  Operator Secret Key (X-Operator-Key)
+                </label>
+                <input
+                  type="password"
+                  value={keyInput}
+                  onChange={(e) => setKeyInput(e.target.value)}
+                  placeholder="Enter OPERATOR_API_KEY..."
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none transition"
+                />
+                <p className="text-[10px] text-slate-500">
+                  Stored exclusively in this browser tab's <code className="text-slate-400">sessionStorage</code>. Never stored in source code, URLs, or Git.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                {operatorKey ? (
+                  <button
+                    type="button"
+                    onClick={() => handleSaveOperatorKey('')}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-950/60 border border-rose-500/40 text-rose-300 hover:bg-rose-900/60 transition"
+                  >
+                    Clear Key
+                  </button>
+                ) : (
+                  <div></div>
+                )}
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowKeyModal(false)}
+                    className="px-4 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200 transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveOperatorKey(keyInput)}
+                    className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition shadow-md shadow-amber-500/20"
+                  >
+                    Save for Session
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Notification Banner */}
         {notification && (
@@ -699,17 +894,24 @@ export default function App() {
 
                   {/* Answer Card */}
                   {askAnswer && (
-                    <div className="bg-slate-950/90 border border-cyan-500/30 rounded-xl p-4 space-y-3 animate-fadeIn">
+                    <div className={`border rounded-xl p-4 space-y-3 animate-fadeIn ${
+                      askAnswer.grounded ? 'bg-slate-950/90 border-cyan-500/30' : 'bg-slate-950/90 border-amber-500/30'
+                    }`}>
                       <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-cyan-400 font-semibold flex items-center space-x-1">
-                          <span>✨</span>
-                          <span>Grounded Answer</span>
+                        <span className={`font-semibold flex items-center space-x-1 ${
+                          askAnswer.grounded ? 'text-cyan-400' : 'text-amber-400'
+                        }`}>
+                          <span>{askAnswer.grounded ? '✨ Grounded Answer' : '⚠️ Assistant Notice'}</span>
                         </span>
-                        {askAnswer.confidence && (
+                        {askAnswer.grounded ? (
                           <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
                             askAnswer.confidence === 'high' ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'
                           }`}>
                             {askAnswer.confidence === 'high' ? 'High Confidence' : 'Moderate Match'}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-950/60 text-amber-300 border border-amber-500/30">
+                            {askAnswer.confidence === 'low' ? 'Fallback / Low Confidence' : 'Unmatched'}
                           </span>
                         )}
                       </div>
@@ -740,9 +942,15 @@ export default function App() {
                         </div>
                       )}
 
-                      <div className="text-[10px] text-slate-500 pt-1">
-                        ℹ️ Answer generated strictly using this episode's transcript and verified article summaries. Verify facts with original sources above.
-                      </div>
+                      {askAnswer.grounded ? (
+                        <div className="text-[10px] text-slate-500 pt-1">
+                          ℹ️ Answer generated strictly using this episode's transcript and verified article summaries. Verify facts with original sources above.
+                        </div>
+                      ) : (
+                        <div className="text-[10px] text-amber-500/80 pt-1 flex items-center justify-between">
+                          <span>💡 If the AI service was momentarily busy, re-submitting your query will generate the grounded answer.</span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
