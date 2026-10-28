@@ -493,109 +493,260 @@ export default function App() {
     : null;
 
   return (
-    <div className={`min-h-screen bg-[#080D1B] text-[#F8FAFC] flex flex-col justify-between selection:bg-cyan-500 selection:text-slate-950 ${readerMode ? 'font-serif' : 'font-sans'}`}>
+    <div className={`min-h-screen bg-[#080D1B] text-[#F8FAFC] flex flex-col md:flex-row selection:bg-cyan-500 selection:text-slate-950 ${readerMode ? 'font-serif' : 'font-sans'}`}>
 
-      {/* ── Top Header ── */}
-      <header className="border-b border-[#263247] bg-[#10182A]/90 backdrop-blur-md sticky top-0 z-30 px-4 sm:px-6 py-3.5 transition-colors">
-        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-4">
-          
+      {/* ── Left Sticky Sidebar (Desktop md+) ── */}
+      <aside className="hidden md:flex md:w-64 lg:w-72 md:flex-col md:fixed md:inset-y-0 md:z-30 md:border-r md:border-[#263247] md:bg-[#10182A] justify-between">
+        <div className="p-5 space-y-6 overflow-y-auto">
           {/* Logo & Branding */}
-          <div className="flex items-center space-x-3">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-cyan-400 via-blue-500 to-indigo-600 flex items-center justify-center font-extrabold text-white shadow-lg shadow-cyan-500/20 text-sm tracking-tight border border-cyan-400/30">
+          <div className="flex items-center space-x-3 pb-3 border-b border-[#263247]/60">
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-cyan-400 via-blue-500 to-indigo-600 flex items-center justify-center font-extrabold text-white shadow-lg shadow-cyan-500/20 text-sm tracking-tight border border-cyan-400/30 flex-shrink-0">
               TN
             </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="text-base sm:text-lg font-bold tracking-tight text-[#F8FAFC]">Tech Innovation News Show</h1>
-                <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-500/30">
-                  AI Broadcast
+            <div className="min-w-0">
+              <div className="flex items-center space-x-1.5">
+                <h1 className="text-sm font-bold tracking-tight text-[#F8FAFC] truncate">Tech Innovation</h1>
+                <span className="px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-500/30 flex-shrink-0">
+                  AI
                 </span>
               </div>
-              <p className="text-xs text-[#94A3B8]">Your daily briefing on what's next in tech.</p>
+              <p className="text-[11px] text-[#94A3B8] truncate">Daily Editorial News Show</p>
             </div>
           </div>
 
-          {/* Service Indicators & Modes */}
-          <div className="flex items-center flex-wrap gap-2 text-xs">
-            
-            {/* API Status */}
-            <div className="inline-flex items-center px-2.5 py-1 rounded-full bg-[#151F32] border border-[#263247]" title="Backend API Health">
-              <span className="text-[#94A3B8] mr-1.5 font-medium">API:</span>
+          {/* Navigation Section */}
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] px-3 pb-1">
+              Navigation
+            </p>
+
+            {/* Nav 1: Articles Feed */}
+            <button
+              onClick={() => setActiveTab('articles')}
+              className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-semibold transition flex items-center justify-between group ${
+                activeTab === 'articles'
+                  ? 'bg-gradient-to-r from-cyan-950/90 to-[#151F32] text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/10'
+                  : 'text-[#94A3B8] hover:text-white hover:bg-[#151F32]/60'
+              }`}
+            >
+              <div className="flex items-center space-x-2.5">
+                <span className="text-base group-hover:scale-110 transition-transform">📰</span>
+                <span>Articles Feed</span>
+              </div>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'articles' ? 'bg-cyan-500/20 text-cyan-300' : 'bg-[#151F32] text-slate-400'
+              }`}>
+                {articles.length}
+              </span>
+            </button>
+
+            {/* Nav 2: Daily Broadcasts */}
+            <button
+              onClick={() => setActiveTab('episodes')}
+              className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-semibold transition flex items-center justify-between group ${
+                activeTab === 'episodes'
+                  ? 'bg-gradient-to-r from-cyan-950/90 to-[#151F32] text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/10'
+                  : 'text-[#94A3B8] hover:text-white hover:bg-[#151F32]/60'
+              }`}
+            >
+              <div className="flex items-center space-x-2.5">
+                <span className="text-base group-hover:scale-110 transition-transform">🎙️</span>
+                <span>Daily Broadcasts</span>
+              </div>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'episodes' ? 'bg-cyan-500/20 text-cyan-300' : 'bg-[#151F32] text-slate-400'
+              }`}>
+                {episodes.length}
+              </span>
+            </button>
+
+            {/* Nav 3: Platform Trends */}
+            <button
+              onClick={() => setActiveTab('analytics')}
+              className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-semibold transition flex items-center justify-between group ${
+                activeTab === 'analytics'
+                  ? 'bg-gradient-to-r from-cyan-950/90 to-[#151F32] text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/10'
+                  : 'text-[#94A3B8] hover:text-white hover:bg-[#151F32]/60'
+              }`}
+            >
+              <div className="flex items-center space-x-2.5">
+                <span className="text-base group-hover:scale-110 transition-transform">📊</span>
+                <span>Platform Trends</span>
+              </div>
+              <span className="text-[10px] text-cyan-400 font-mono font-semibold">Live</span>
+            </button>
+          </div>
+
+          {/* Quick Action in Sidebar */}
+          <div className="space-y-2 pt-2 border-t border-[#263247]/60">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] px-3 pb-1">
+              Quick Ingestion
+            </p>
+            <button
+              onClick={handleIngestNews}
+              disabled={isIngesting || !isDbConnected}
+              className={`w-full px-3 py-2 rounded-xl text-xs font-semibold border transition flex items-center justify-center space-x-2 ${
+                isIngesting || !isDbConnected
+                  ? 'bg-[#151F32] text-slate-500 border-[#263247] cursor-not-allowed'
+                  : 'bg-[#151F32] hover:bg-[#151F32]/80 border-[#263247] text-white hover:border-cyan-500/40'
+              }`}
+            >
+              <span>{isIngesting ? '⏳' : '📥'}</span>
+              <span>{isIngesting ? 'Fetching RSS...' : 'Ingest Latest RSS'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Sidebar Footer: Service Status & Modes */}
+        <div className="p-4 border-t border-[#263247] bg-[#0C1424] space-y-3">
+          {/* Health Indicators */}
+          <div className="bg-[#10182A] border border-[#263247] rounded-xl p-3 space-y-2">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-[#94A3B8] font-medium">API Server</span>
               {backendStatus === 'connected' ? (
                 <span className="text-emerald-400 font-semibold flex items-center">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse"></span>Online
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span>Online
                 </span>
               ) : (
                 <span className="text-rose-400 font-semibold flex items-center">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400 mr-1"></span>Offline
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400 mr-1.5"></span>Offline
                 </span>
               )}
             </div>
 
-            {/* DB Status */}
-            <div className="inline-flex items-center px-2.5 py-1 rounded-full bg-[#151F32] border border-[#263247]" title="Neon PostgreSQL Database">
-              <span className="text-[#94A3B8] mr-1.5 font-medium">DB:</span>
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-[#94A3B8] font-medium">PostgreSQL (Neon)</span>
               {isDbConnected ? (
                 <span className="text-emerald-400 font-semibold flex items-center">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1"></span>Connected
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5"></span>Connected
                 </span>
               ) : (
                 <span className="text-amber-400 font-semibold">Disconnected</span>
               )}
             </div>
 
-            {/* AI Status */}
-            <div className="inline-flex items-center px-2.5 py-1 rounded-full bg-[#151F32] border border-[#263247]" title="Google Gemini AI Engine">
-              <span className="text-[#94A3B8] mr-1.5 font-medium">AI:</span>
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-[#94A3B8] font-medium">Google Gemini</span>
               {isAiConfigured ? (
                 <span className="text-cyan-400 font-semibold flex items-center">
-                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 mr-1"></span>Gemini
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 mr-1.5"></span>Ready
                 </span>
               ) : (
                 <span className="text-amber-400 font-semibold">No Key</span>
               )}
             </div>
+          </div>
 
-            {/* Reader Mode Toggle (Genuine, accessible reading toggle) */}
+          {/* Mode Controls */}
+          <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => {
                 const nextMode = !readerMode;
                 setReaderMode(nextMode);
-                showNotification('info', nextMode ? '📖 Reader Mode Active: Distraction-free editorial view with spacious typography.' : 'Standard View Restored.');
+                showNotification('info', nextMode ? '📖 Reader Mode Active: Distraction-free editorial view.' : 'Standard View Restored.');
               }}
-              className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border transition ${
+              className={`w-full py-2 px-2.5 rounded-xl text-xs font-semibold border transition flex items-center justify-center space-x-1.5 ${
                 readerMode
-                  ? 'bg-cyan-950/80 border-cyan-400/50 text-cyan-300 shadow-sm shadow-cyan-500/20'
+                  ? 'bg-cyan-950/80 border-cyan-400/50 text-cyan-300 shadow-sm'
                   : 'bg-[#151F32] border-[#263247] text-[#94A3B8] hover:text-white'
               }`}
-              title="Toggle Reader Mode (improves article readability and text spacing)"
+              title="Toggle Reader Mode"
             >
-              <span className="mr-1">{readerMode ? '📖' : '👓'}</span>
-              <span>{readerMode ? 'Reader On' : 'Reader Mode'}</span>
+              <span>{readerMode ? '📖' : '👓'}</span>
+              <span>{readerMode ? 'Reader' : 'Reader'}</span>
             </button>
 
-            {/* Operator Auth Button */}
             <button
               onClick={() => {
                 setKeyInput(operatorKey);
                 setShowKeyModal(true);
               }}
-              className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border transition ${
+              className={`w-full py-2 px-2.5 rounded-xl text-xs font-semibold border transition flex items-center justify-center space-x-1.5 ${
                 operatorKey
                   ? 'bg-amber-950/70 border-amber-500/40 text-amber-300 hover:bg-amber-900/60'
-                  : 'bg-[#151F32] border-[#263247] text-[#94A3B8] hover:text-[#F8FAFC]'
+                  : 'bg-[#151F32] border-[#263247] text-[#94A3B8] hover:text-white'
               }`}
-              title={operatorKey ? 'Operator Key active for this session. Click to manage.' : 'Reader mode active. Click to unlock Operator Controls.'}
+              title="Operator Auth"
             >
-              <span className="mr-1">{operatorKey ? '🔑' : '🔒'}</span>
-              <span>{operatorKey ? 'Operator Active' : 'Operator Key'}</span>
+              <span>{operatorKey ? '🔑' : '🔒'}</span>
+              <span>{operatorKey ? 'Operator' : 'Key'}</span>
+            </button>
+          </div>
+
+          <div className="text-[10px] text-center text-[#94A3B8] font-mono">
+            Asia/Kolkata (IST) Active
+          </div>
+        </div>
+      </aside>
+
+      {/* ── Mobile Top Header (Hidden on desktop md+) ── */}
+      <div className="md:hidden border-b border-[#263247] bg-[#10182A] sticky top-0 z-30">
+        <div className="px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center space-x-2.5">
+            <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-cyan-400 via-blue-500 to-indigo-600 flex items-center justify-center font-extrabold text-white text-xs">
+              TN
+            </div>
+            <div>
+              <h1 className="text-sm font-bold text-white leading-tight">Tech Innovation News</h1>
+              <p className="text-[10px] text-[#94A3B8]">AI Broadcast</p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setReaderMode(!readerMode)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${
+                readerMode ? 'bg-cyan-950 text-cyan-300 border-cyan-500/40' : 'bg-[#151F32] text-slate-300 border-[#263247]'
+              }`}
+            >
+              {readerMode ? '📖' : '👓'}
+            </button>
+            <button
+              onClick={() => { setKeyInput(operatorKey); setShowKeyModal(true); }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${
+                operatorKey ? 'bg-amber-950 text-amber-300 border-amber-500/40' : 'bg-[#151F32] text-slate-300 border-[#263247]'
+              }`}
+            >
+              {operatorKey ? '🔑' : '🔒'}
             </button>
           </div>
         </div>
-      </header>
 
-      {/* ── Main Container ── */}
-      <main className={`mx-auto px-4 sm:px-6 py-8 flex-1 w-full space-y-8 ${readerMode ? 'max-w-4xl' : 'max-w-6xl'}`}>
+        {/* Mobile Nav Tabs */}
+        <div className="flex border-t border-[#263247]/60 px-2 py-1.5 overflow-x-auto space-x-1">
+          <button
+            onClick={() => setActiveTab('articles')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 flex-shrink-0 ${
+              activeTab === 'articles' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'text-[#94A3B8]'
+            }`}
+          >
+            <span>📰</span>
+            <span>Articles ({articles.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('episodes')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 flex-shrink-0 ${
+              activeTab === 'episodes' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'text-[#94A3B8]'
+            }`}
+          >
+            <span>🎙️</span>
+            <span>Broadcasts ({episodes.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('analytics')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 flex-shrink-0 ${
+              activeTab === 'analytics' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'text-[#94A3B8]'
+            }`}
+          >
+            <span>📊</span>
+            <span>Trends</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── Main Content Area (Offset by sidebar on desktop md:pl-64 lg:pl-72) ── */}
+      <div className="flex-1 md:pl-64 lg:pl-72 flex flex-col min-w-0 min-h-screen">
+        <main className={`p-4 sm:p-6 lg:p-8 space-y-6 flex-1 w-full mx-auto ${readerMode ? 'max-w-4xl' : 'max-w-7xl'}`}>
 
         {/* Operator Key Modal */}
         {showKeyModal && (
@@ -755,50 +906,22 @@ export default function App() {
           </section>
         )}
 
-        {/* ── Primary Navigation Tabs ── */}
-        <nav className="flex items-center space-x-1.5 bg-[#10182A] border border-[#263247] p-1.5 rounded-2xl w-full sm:w-fit overflow-x-auto">
-          <button
-            onClick={() => setActiveTab('articles')}
-            className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center space-x-2 flex-shrink-0 ${
-              activeTab === 'articles'
-                ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-sm'
-                : 'text-[#94A3B8] hover:text-white hover:bg-[#151F32]'
-            }`}
-          >
-            <span>📰</span>
-            <span>Articles Feed</span>
-            <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-[#151F32] text-slate-300">
-              {articles.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('episodes')}
-            className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center space-x-2 flex-shrink-0 ${
-              activeTab === 'episodes'
-                ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-sm'
-                : 'text-[#94A3B8] hover:text-white hover:bg-[#151F32]'
-            }`}
-          >
-            <span>🎙️</span>
-            <span>Daily Broadcasts</span>
-            <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-[#151F32] text-slate-300">
-              {episodes.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('analytics')}
-            className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center space-x-2 flex-shrink-0 ${
-              activeTab === 'analytics'
-                ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-sm'
-                : 'text-[#94A3B8] hover:text-white hover:bg-[#151F32]'
-            }`}
-          >
-            <span>📊</span>
-            <span>Platform Trends</span>
-          </button>
-        </nav>
+        {/* Active View Header */}
+        <div className="flex items-center justify-between pb-1">
+          <div>
+            <h2 className="text-lg font-bold text-white tracking-tight flex items-center space-x-2">
+              <span>{activeTab === 'articles' ? '📰' : activeTab === 'episodes' ? '🎙️' : '📊'}</span>
+              <span>{activeTab === 'articles' ? 'Articles Feed' : activeTab === 'episodes' ? 'Daily Broadcasts' : 'Platform Trends'}</span>
+            </h2>
+            <p className="text-xs text-[#94A3B8]">
+              {activeTab === 'articles'
+                ? `Curated technology stories (${articles.length} total, ${completedCount} AI-analyzed)`
+                : activeTab === 'episodes'
+                ? `Archived and active AI radio broadcasts (${episodes.length} episodes)`
+                : 'Aggregated editorial metrics, canonical categories, and publishing trends'}
+            </p>
+          </div>
+        </div>
 
         {/* ══════════════════════════════════════════════════════════════════════════
             TAB 1: ARTICLES FEED
@@ -1646,7 +1769,7 @@ export default function App() {
       </main>
 
       {/* ── Polished Footer ── */}
-      <footer className="border-t border-[#263247] bg-[#10182A]/80 py-6 text-center space-y-1.5 px-4">
+      <footer className="border-t border-[#263247] bg-[#10182A]/80 py-6 text-center space-y-1.5 px-4 mt-auto">
         <p className="text-xs font-semibold text-slate-300">
           Tech Innovation News Show · Production Ready Full-Stack Platform
         </p>
@@ -1655,5 +1778,6 @@ export default function App() {
         </p>
       </footer>
     </div>
-  );
+  </div>
+);
 }
