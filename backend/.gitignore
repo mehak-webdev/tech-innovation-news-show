@@ -1,7 +1,7 @@
 node_modules/
 .env
 
-# Generated audio files (runtime artifacts, not committed)
-public/audio/*.wav
-public/audio/*.mp3
+# Audio temporary files (keep sample WAV files committed for durable deployment fallback)
+public/audio/*.tmp
+
 

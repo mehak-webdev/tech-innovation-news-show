@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import pool from '../db/index.js';
 import {
   S3Client,
   PutObjectCommand,
@@ -195,6 +196,15 @@ export async function uploadAudio({ episodeId, episodeDate, buffer, filename }) 
   fs.writeFileSync(localFilePath, buffer);
   console.log(`[AudioStorage] Saved ${audioBytes} bytes locally at: ${localFilePath}`);
 
+  // Also persist binary audio buffer to PostgreSQL database so ephemeral host restarts never lose audio
+  if (episodeId && buffer) {
+    try {
+      await pool.query('UPDATE episodes SET audio_data = $1 WHERE id = $2', [buffer, episodeId]);
+    } catch (dbErr) {
+      console.warn(`[AudioStorage] Database audio_data save warning: ${dbErr.message}`);
+    }
+  }
+
   return {
     provider: 'local',
     key: safeFilename,
@@ -258,6 +268,19 @@ export async function streamAudioResponse(req, res, episode) {
   // Local file streaming fallback
   const localFilename = path.basename(storageKey);
   const localFilePath = path.join(LOCAL_AUDIO_DIR, localFilename);
+
+  // If missing from ephemeral disk, automatically re-hydrate audio bytes from PostgreSQL database
+  if (!fs.existsSync(localFilePath) && episode.id) {
+    try {
+      const dbRes = await pool.query('SELECT audio_data FROM episodes WHERE id = $1', [episode.id]);
+      if (dbRes.rows[0]?.audio_data) {
+        fs.writeFileSync(localFilePath, dbRes.rows[0].audio_data);
+        console.log(`[AudioStorage] Re-hydrated audio file on disk from database for episode ${episode.id}`);
+      }
+    } catch (dbErr) {
+      console.warn(`[AudioStorage] Database re-hydration check failed: ${dbErr.message}`);
+    }
+  }
 
   if (!fs.existsSync(localFilePath)) {
     return res.status(404).json({

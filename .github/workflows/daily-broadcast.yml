@@ -33,3 +33,4 @@ jobs:
             echo "Daily job returned non-success HTTP status $status"
             exit 1
           fi
+
