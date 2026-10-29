@@ -1,0 +1,35 @@
+name: Daily AI News Episode Automation
+
+on:
+  schedule:
+    # 6:00 PM IST = 12:30 PM UTC every day
+    - cron: '30 12 * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  run-daily-episode:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake Up Backend & Check Health
+        run: |
+          echo "Pinging backend health..."
+          curl -s -f "${{ secrets.BACKEND_API_URL }}/health" || echo "Backend waking up..."
+          sleep 10
+
+      - name: Execute Daily Episode Job
+        run: |
+          echo "Triggering daily episode workflow..."
+          response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "${{ secrets.BACKEND_API_URL }}/api/episodes/daily-job" \
+            -H "Content-Type: application/json" \
+            -H "X-Operator-Key: ${{ secrets.OPERATOR_API_KEY }}")
+          
+          body=$(echo "$response" | sed -e '$d')
+          status=$(echo "$response" | tail -n1 | cut -d':' -f2)
+          
+          echo "Status Code: $status"
+          echo "Response: $body"
+          
+          if [ "$status" -ne 200 ] && [ "$status" -ne 201 ]; then
+            echo "Daily job returned non-success HTTP status $status"
+            exit 1
+          fi
