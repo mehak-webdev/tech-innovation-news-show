@@ -62,10 +62,10 @@ Respond strictly with a valid JSON object matching this schema:
 }`;
 
   const candidateModels = [
-    'gemini-3.5-flash',
-    'gemini-3.6-flash',
     'gemini-3.5-flash-lite',
-    'gemini-flash-lite-latest'
+    'gemini-flash-lite-latest',
+    'gemini-3.5-flash',
+    'gemini-3.6-flash'
   ];
   let lastError = null;
 
@@ -87,8 +87,8 @@ Respond strictly with a valid JSON object matching this schema:
         }
       });
 
-      // 10-second max timeout per model attempt
-      const response = await withTimeout(generatePromise, 10000);
+      // 25-second max timeout per model attempt (accommodates free-tier network latency)
+      const response = await withTimeout(generatePromise, 25000);
 
       const responseText = response.text;
       if (!responseText) {
