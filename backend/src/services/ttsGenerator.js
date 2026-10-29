@@ -130,7 +130,7 @@ export async function generateTTSAudio(script, episodeDate) {
 
         // Deterministically parse exact duration from WAV header
         const metadata = parseWavMetadata(wavBuffer);
-        const durationSeconds = metadata.durationSeconds;
+        const durationSeconds = Math.round(metadata.durationSeconds || 90);
 
         return {
           filename,

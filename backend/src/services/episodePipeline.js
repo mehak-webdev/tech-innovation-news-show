@@ -203,7 +203,7 @@ export async function generateEpisode(options = {}) {
     // ─── Stage 3: Generate or Reuse TTS Audio ─────────────────────────────────
     let audioFilename = episode.audio_filename;
     let audioUrl = episode.audio_url;
-    let durationSeconds = episode.duration_seconds || 90;
+    let durationSeconds = Math.round(episode.duration_seconds || 90);
 
     const audioAlreadyVerified = audioFilename && verifyAudioFile(audioFilename);
 
@@ -229,7 +229,7 @@ export async function generateEpisode(options = {}) {
 
       audioFilename = ttsResult.filename;
       audioUrl = `/api/episodes/${episode.id}/audio`;
-      durationSeconds = uploadResult.durationSeconds || ttsResult.durationSeconds;
+      durationSeconds = Math.round(uploadResult.durationSeconds || ttsResult.durationSeconds || 90);
 
       await pool.query(`
         UPDATE episodes
